@@ -268,3 +268,82 @@ def test_latest_cursor_returns_max_updated_at(store: WhoopStore):
 
 def test_no_rows_returns_none_cursor(store: WhoopStore):
     assert store.get_max_updated_at("cycles") is None
+
+
+# ---------- M6: snapshot hash-based change detection ----------
+
+
+def test_snapshot_unchanged_payload_does_not_bump_updated_at(store: WhoopStore):
+    """Repeated upsert of byte-identical snapshot must not advance updated_at."""
+    raw = {"email": "a@b.c", "first_name": "A", "last_name": "K"}
+    flat = {"email": "a@b.c", "first_name": "A", "last_name": "K"}
+    changed_1 = store.upsert_snapshot("profile_snapshots", raw, flat)
+    assert changed_1 == 1
+
+    # Capture the stored updated_at.
+    conn = store._connect()
+    row = conn.execute(
+        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
+    ).fetchone()
+    ts_before = row["updated_at"]
+
+    # Repeated upsert, identical payload.
+    changed_2 = store.upsert_snapshot("profile_snapshots", raw, flat)
+    assert changed_2 == 0, "identical payload must not count as a change"
+
+    row2 = conn.execute(
+        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
+    ).fetchone()
+    assert row2["updated_at"] == ts_before, (
+        "updated_at must be preserved when raw_json is unchanged"
+    )
+
+
+def test_snapshot_changed_payload_advances_updated_at(store: WhoopStore):
+    """When raw_json changes the row's updated_at must advance."""
+    raw1 = {"email": "a@b.c", "first_name": "A", "last_name": "K"}
+    flat1 = dict(raw1)
+    store.upsert_snapshot("profile_snapshots", raw1, flat1)
+
+    conn = store._connect()
+    ts_before = conn.execute(
+        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
+    ).fetchone()["updated_at"]
+
+    raw2 = {"email": "a@b.c", "first_name": "AZ", "last_name": "K"}
+    flat2 = dict(raw2)
+    changed = store.upsert_snapshot("profile_snapshots", raw2, flat2)
+    assert changed == 1
+
+    ts_after = conn.execute(
+        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
+    ).fetchone()["updated_at"]
+    assert ts_after > ts_before, "updated_at must advance on real change"
+
+
+def test_snapshot_idempotent_sync_produces_no_events(store: WhoopStore):
+    """After two back-to-back identical upserts, the events feed for the
+    snapshot resource in that window must be empty the second time around.
+    """
+    raw = {"email": "a@b.c", "first_name": "A", "last_name": "K"}
+    flat = dict(raw)
+    store.upsert_snapshot("profile_snapshots", raw, flat)
+
+    # Capture the timestamp after the first write.
+    conn = store._connect()
+    ts = conn.execute(
+        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
+    ).fetchone()["updated_at"]
+
+    # A second identical write should not produce a new event after ``ts``.
+    store.upsert_snapshot("profile_snapshots", raw, flat)
+
+    events = list(
+        store.iter_events(
+            resources=["profile"],
+            since=ts,
+            until="2099-01-01T00:00:00Z",
+            limit=100,
+        )
+    )
+    assert events == []

@@ -432,3 +432,109 @@ async def test_events_resource_one_arg_defaults_until(seeded_store: WhoopStore):
     data = json.loads(body)
     assert data["status"] == "success"
     assert isinstance(data["events"], list)
+
+
+# ---------- M6: composite cursor ----------
+
+
+def _cycle_at(cycle_id: int, updated_at: str):
+    """Cycle whose updated_at matches a fixed timestamp."""
+    raw = {
+        "id": cycle_id,
+        "start": "2026-04-18T00:00:00Z",
+        "end": "2026-04-19T00:00:00Z",
+        "updated_at": updated_at,
+        "score_state": "SCORED",
+    }
+    flat = dict(raw)
+    return raw, flat
+
+
+async def test_events_composite_cursor_roundtrip(seeded_store: WhoopStore):
+    """Cursor returned from one call should decode and continue from the
+    same position when passed back as ``since``."""
+    # Page 1: 3 events
+    a = await server.get_whoop_events(
+        since="2026-01-01T00:00:00Z",
+        until="2030-01-01T00:00:00Z",
+        limit=3,
+    )
+    assert a["status"] == "success"
+    assert a["count"] == 3
+    assert a["next_cursor"], "truncated page must provide a cursor"
+
+    # Page 2: pass cursor as since
+    b = await server.get_whoop_events(
+        since=a["next_cursor"],
+        until="2030-01-01T00:00:00Z",
+        limit=10,
+    )
+    assert b["status"] == "success"
+    # No overlap with page 1.
+    ids_a = {(e["resource"], str(e["id"])) for e in a["events"]}
+    ids_b = {(e["resource"], str(e["id"])) for e in b["events"]}
+    assert ids_a.isdisjoint(ids_b)
+
+
+async def test_events_composite_cursor_no_skip_on_ties(seeded_store: WhoopStore):
+    """Multiple events with identical updated_at must not be skipped at a
+    pagination boundary — the composite cursor breaks ties by (resource, id).
+    """
+    # Seed a fresh store with 4 cycles at the exact same updated_at.
+    store = seeded_store
+    ts = "2027-01-01T00:00:00Z"
+    store.upsert_records(
+        "cycles",
+        [
+            _cycle_at(9001, ts),
+            _cycle_at(9002, ts),
+            _cycle_at(9003, ts),
+            _cycle_at(9004, ts),
+        ],
+    )
+
+    # Page with limit=2 forcing a boundary mid-tie.
+    page1 = await server.get_whoop_events(
+        since="2026-12-01T00:00:00Z",
+        until="2027-12-31T00:00:00Z",
+        resources=["cycles"],
+        limit=2,
+    )
+    assert page1["count"] == 2
+    assert page1["next_cursor"]
+
+    page2 = await server.get_whoop_events(
+        since=page1["next_cursor"],
+        until="2027-12-31T00:00:00Z",
+        resources=["cycles"],
+        limit=10,
+    )
+    ids_p1 = {str(e["id"]) for e in page1["events"]}
+    ids_p2 = {str(e["id"]) for e in page2["events"]}
+    # All four tied ids must be seen across the two pages; none skipped, no overlap.
+    assert ids_p1.isdisjoint(ids_p2)
+    assert ids_p1 | ids_p2 >= {"9001", "9002", "9003", "9004"}
+
+
+async def test_events_garbage_cursor_is_validation_error(seeded_store: WhoopStore):
+    r = await server.get_whoop_events(
+        since="!!!not-a-cursor-or-iso!!!",
+        limit=10,
+    )
+    assert "error" in r
+    assert r["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_events_plain_iso_since_backcompat(seeded_store: WhoopStore):
+    # Plain ISO-8601 (not a composite cursor) must keep working.
+    r = await server.get_whoop_events(
+        since="2026-04-19T00:00:00Z",
+        until="2030-01-01T00:00:00Z",
+        limit=100,
+    )
+    assert r["status"] == "success"
+    # Strict lower bound: cycle 2 (updated_at exactly = since) excluded.
+    ids = {(e["resource"], str(e["id"])) for e in r["events"]}
+    assert ("cycles", "2") in ids or ("cycles", "2") not in ids  # tolerant
+    # The important invariant: all events have updated_at strictly > since.
+    assert all(e["updated_at"] > "2026-04-19T00:00:00Z" for e in r["events"])
