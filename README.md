@@ -463,3 +463,57 @@ Error codes: `VALIDATION_ERROR`, `CACHE_EMPTY` (run `sync_whoop` first),
 
 Exports contain your raw fitness data in flat JSON shape — no tokens,
 no raw API responses. Write them to a secure location.
+
+## M5 Event feed (v0.6.0)
+
+M5 adds `get_whoop_events`, a chronological "what's new" feed across all
+cached resources. Pure cache read — no WHOOP API calls from this path.
+Run `sync_whoop()` first to pick up upstream changes.
+
+```
+get_whoop_events(since, until=None, resources=None, limit=500)
+```
+
+- `since`: ISO-8601 timestamp, strict lower bound on `updated_at`.
+- `until`: ISO-8601 timestamp, strict upper bound. Defaults to now UTC.
+- `resources`: subset of `["cycles","recoveries","sleeps","workouts",
+  "body_measurement","profile"]`. `None` means all.
+- `limit`: cap on total events returned. Must be in `[1, 5000]`.
+
+The window is half-open — `updated_at > since AND updated_at < until`.
+The "since" bound is strict so callers can feed a returned `next_cursor`
+back in as the next `since` without re-seeing that row. Events are
+sorted by `updated_at` ascending with `resource` as the tiebreaker.
+
+Each event wraps a flat record with a type tag and change timestamp:
+
+```json
+{"resource": "sleeps",
+ "id": "bb68db7b-...",
+ "updated_at": "2026-04-20T14:12:33.123Z",
+ "record": { <full flat_json> }}
+```
+
+Return shape:
+
+```json
+{"status": "success", "count": 17,
+ "since": "...", "until": "...",
+ "events": [...],
+ "next_cursor": null | "<iso>"}
+```
+
+If more events exist than `limit`, `next_cursor` is set to the
+`updated_at` of the last returned event so the caller can paginate by
+passing that value back as `since`. Otherwise `next_cursor` is `null`.
+
+Snapshot resources (`body_measurement`, `profile`) contribute their
+single "current" row when its stored `updated_at` falls in the window.
+
+Error codes: `VALIDATION_ERROR` (bad `since`/`until`, unknown resource,
+`limit` out of range), `CACHE_ERROR` (store failure). Tool never raises.
+
+Also available as MCP resources:
+
+- `whoop://db/events/{since}` — until defaults to now UTC
+- `whoop://db/events/{since}/{until}` — explicit window

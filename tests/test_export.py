@@ -463,4 +463,5 @@ async def test_export_tool_never_raises(tmp_path: Path, seeded_store: WhoopStore
 
 
 def test_server_version_bumped_to_0_5_0():
-    assert server.SERVER_VERSION == "0.5.0"
+    # M4 required >= 0.5.0; later milestones continue the bump.
+    assert server.SERVER_VERSION >= "0.5.0"
