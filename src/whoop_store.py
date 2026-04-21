@@ -342,10 +342,13 @@ class WhoopStore:
         end: Optional[str],
         limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Return flat_json rows whose ``start`` column falls in ``[start, end)``.
+        """Return flat_json rows overlapping the window ``[start, end)``.
 
-        ``start`` / ``end`` None means unbounded on that side. Results are
-        ordered by ``start`` DESC (most recent first).
+        Overlap semantics match the WHOOP API: a record is included if its
+        own time range intersects the window, not just if it starts inside.
+        Cycles, sleeps, and workouts frequently span across date boundaries.
+        ``None`` on either side means unbounded. Results are ordered by
+        ``start`` DESC (most recent first).
         """
         if table not in RECORD_TABLES:
             raise ValueError(f"query_range: unknown table {table!r}")
@@ -353,9 +356,11 @@ class WhoopStore:
         clauses: List[str] = []
         params: List[Any] = []
         if start is not None:
-            clauses.append("start >= ?")
+            # Record ended at/after window_start, or is still in progress.
+            clauses.append("(end > ? OR end IS NULL)")
             params.append(start)
         if end is not None:
+            # Record started before window_end.
             clauses.append("start < ?")
             params.append(end)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -375,11 +380,14 @@ class WhoopStore:
         start: Optional[str],
         end: Optional[str],
     ) -> Iterator[Dict[str, Any]]:
-        """Yield decoded flat_json dicts for a resource in ``[start, end]``.
+        """Yield decoded flat_json dicts for a resource overlapping ``[start, end]``.
 
-        Window semantics are **inclusive-inclusive** on the resource's
-        ``start`` column. ``None`` on either side means unbounded. Results
-        are ordered by ``start`` ASC for deterministic exports.
+        Overlap semantics match ``query_range`` / the WHOOP API: a record is
+        yielded if its own time range intersects the window, so cycles and
+        sleeps that span across date boundaries are included regardless of
+        which boundary their ``start`` falls on. ``None`` on either side
+        means unbounded. Results are ordered by ``start`` ASC for
+        deterministic exports.
 
         For snapshot tables (``profile_snapshots``, ``body_measurements``)
         the window is ignored and the single ``current`` row is yielded if
@@ -399,7 +407,7 @@ class WhoopStore:
         clauses: List[str] = []
         params: List[Any] = []
         if start is not None:
-            clauses.append("start >= ?")
+            clauses.append("(end >= ? OR end IS NULL)")
             params.append(start)
         if end is not None:
             clauses.append("start <= ?")

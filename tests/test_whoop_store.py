@@ -169,6 +169,56 @@ def test_range_query_by_start(store: WhoopStore):
     assert len(rows) == 2
 
 
+def test_range_query_uses_overlap_semantics(store: WhoopStore):
+    """Regression: a cycle starting before the window but spanning into it must be returned.
+
+    WHOOP cycles routinely start in the evening of day N-1 and end on day N.
+    Filtering by ``start >= window_start`` alone would wrongly exclude them.
+    """
+    # Cycle starts 21:23 on Apr 18, ends 07:12 on Apr 19 — spans into the window.
+    store.upsert_records("cycles", [(
+        _raw_cycle(2001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"),
+        _flat_cycle(2001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
+    )])
+    # In-progress cycle: start before window end, end is NULL.
+    store.upsert_records("cycles", [(
+        _raw_cycle(2002, "2026-04-20T22:00:00Z", None, "2026-04-20T22:00:00Z"),
+        _flat_cycle(2002, "2026-04-20T22:00:00Z", None),
+    )])
+    # Cycle fully outside the window.
+    store.upsert_records("cycles", [(
+        _raw_cycle(2003, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", "2026-04-11T00:00:00Z"),
+        _flat_cycle(2003, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z"),
+    )])
+
+    rows = store.query_range(
+        "cycles",
+        start="2026-04-19T00:00:00Z",
+        end="2026-04-21T00:00:00Z",
+    )
+    ids = {r["id"] for r in rows}
+    assert 2001 in ids, "cycle that spans into window must be included"
+    assert 2002 in ids, "in-progress cycle (end IS NULL) must be included"
+    assert 2003 not in ids, "cycle fully outside window must be excluded"
+
+
+def test_iter_records_uses_overlap_semantics(store: WhoopStore):
+    """Same overlap regression for ``iter_records`` (exports path)."""
+    store.upsert_records("cycles", [(
+        _raw_cycle(3001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"),
+        _flat_cycle(3001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
+    )])
+    store.upsert_records("cycles", [(
+        _raw_cycle(3002, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", "2026-04-11T00:00:00Z"),
+        _flat_cycle(3002, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z"),
+    )])
+    ids = {r["id"] for r in store.iter_records(
+        "cycles", start="2026-04-19T00:00:00Z", end="2026-04-21T00:00:00Z"
+    )}
+    assert 3001 in ids
+    assert 3002 not in ids
+
+
 def test_query_limit(store: WhoopStore):
     for i in range(5):
         s = f"2026-04-{10+i:02d}T00:00:00Z"

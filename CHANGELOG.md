@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-04-21
+### Fixed
+- Cache-read helpers (`query_range`, `iter_records`) filtered by `start` column inclusion only. WHOOP cycles/sleeps/workouts frequently span across date boundaries (e.g. a cycle starting 21:23 on day N-1 and ending on day N), so cache reads missed records that the live API included. Both helpers now use overlap semantics: a record is returned when its `[start, end]` range intersects the requested window, matching the API. In-progress records (`end IS NULL`) are treated as still ongoing. Cache-first reads (`fresh=False`) and live reads (`fresh=True`) now return the same record IDs for the same window.
+
 ## [0.7.2] - 2026-04-21
 ### Fixed
 - `list_whoop_cycles` / `list_whoop_recoveries` / `list_whoop_sleeps` / `list_whoop_workouts` passed date-only (`YYYY-MM-DD`) `start`/`end` through unchanged; WHOOP v2 rejects that form with `404 NOT_FOUND`. Client now normalizes date-only inputs to `YYYY-MM-DDT00:00:00.000Z` before sending. Full ISO-8601 inputs are unchanged.
