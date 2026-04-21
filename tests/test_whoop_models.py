@@ -150,12 +150,12 @@ def test_sleep_flatten(fixture_loader):
     for bad in ("user_id", "created_at", "updated_at", "v1_id", "score"):
         assert bad not in flat
 
-    # Stage renames + ms->s (1 decimal)
-    assert flat["in_bed_seconds"] == pytest.approx(25570.4, abs=0.2)
-    assert flat["light_sleep_seconds"] == pytest.approx(12906.5, abs=0.2)
-    assert flat["rem_sleep_seconds"] == pytest.approx(5642.4, abs=0.2)
-    assert flat["deep_sleep_seconds"] == pytest.approx(5701.4, abs=0.2)
-    assert flat["awake_seconds"] == pytest.approx(1320.1, abs=0.2)
+    # Stage renames + ms->s (deterministic round(ms/1000, 1))
+    assert flat["in_bed_seconds"] == 25570.3
+    assert flat["light_sleep_seconds"] == 12906.5
+    assert flat["rem_sleep_seconds"] == 5642.4
+    assert flat["deep_sleep_seconds"] == 5701.4
+    assert flat["awake_seconds"] == 1320.1
     assert flat["sleep_cycle_count"] == 5
     assert flat["disturbance_count"] == 9
 
