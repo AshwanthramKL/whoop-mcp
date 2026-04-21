@@ -10,12 +10,12 @@ below into whatever shape the registry accepts.
 
 | Field | Value |
 |-------|-------|
-| Name | `whoop-mcp-server` |
+| Name | `whoop-mcp` |
 | Display name | WHOOP MCP Server |
 | Description | Read-only WHOOP v2 fitness data (cycles, recoveries, sleeps, workouts, profile, body measurement) for MCP clients, with a local SQLite cache. |
-| Repository | https://github.com/romanevstigneev/whoop-mcp-server |
+| Repository | https://github.com/AshwanthramKL/whoop-mcp |
 | License | MIT (see `LICENSE`) |
-| Language | Python (>=3.10 recommended; >=3.8 declared) |
+| Language | Python (>=3.10) |
 | Transport | stdio |
 
 ## Entrypoint
@@ -44,6 +44,7 @@ pip install -r requirements.txt
 
 - `read:profile`
 - `read:body_measurement`
+- `read:cycles`
 - `read:recovery`
 - `read:sleep`
 - `read:workout`

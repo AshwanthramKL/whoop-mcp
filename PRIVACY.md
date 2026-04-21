@@ -62,9 +62,11 @@ artifacts. Your WHOOP account on whoop.com is unaffected.
 The OAuth scopes requested are the read-only set:
 
 - `read:profile`
-- `read:workout`
-- `read:sleep`
+- `read:body_measurement`
+- `read:cycles`
 - `read:recovery`
+- `read:sleep`
+- `read:workout`
 - `offline` (for refresh tokens)
 
 The server has no write access to your WHOOP account and no way to

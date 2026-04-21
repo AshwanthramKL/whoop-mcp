@@ -8,7 +8,7 @@ All records are mirrored into a local SQLite cache at
 except for the authenticated calls the server itself makes to the WHOOP
 v2 API.
 
-Current version: **0.7.1** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **0.7.6** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## Table of contents
 
@@ -43,17 +43,17 @@ Five-minute path, assuming Python 3.10+.
 
 ```bash
 # 1. Clone and create a venv.
-git clone https://github.com/romanevstigneev/whoop-mcp-server.git
-cd whoop-mcp-server
+git clone https://github.com/AshwanthramKL/whoop-mcp.git
+cd whoop-mcp
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Create a WHOOP developer app.
-#    https://developer.whoop.com  ->  Create App
-#    Redirect URI:  http://localhost:8765/callback
+#    https://developer-dashboard.whoop.com/apps/create
+#    Redirect URI:  http://localhost:8000/callback
 #    Scopes:        read:profile read:body_measurement read:recovery
-#                   read:sleep read:workout offline
+#                   read:cycles read:sleep read:workout offline
 
 # 3. Paste your credentials into the environment.
 export WHOOP_CLIENT_ID="<your client id>"
@@ -63,9 +63,13 @@ export WHOOP_CLIENT_SECRET="<your client secret>"
 #    saves encrypted tokens to ~/.whoop-mcp-server/tokens.json).
 python setup_direct_oauth.py
 
-# 5. Register with Claude.
-claude mcp add whoop -- /absolute/path/to/whoop-mcp-server/.venv/bin/python \
-  /absolute/path/to/whoop-mcp-server/src/whoop_mcp_server.py
+# 5. Register with Claude. The --env flags are required — the server uses
+#    them to refresh tokens when the 1-hour access token expires.
+claude mcp add whoop --scope user \
+  --env WHOOP_CLIENT_ID="$WHOOP_CLIENT_ID" \
+  --env WHOOP_CLIENT_SECRET="$WHOOP_CLIENT_SECRET" \
+  -- /absolute/path/to/whoop-mcp/.venv/bin/python \
+  /absolute/path/to/whoop-mcp/src/whoop_mcp_server.py
 ```
 
 For Claude Desktop, add the equivalent entry to
@@ -244,9 +248,10 @@ One flattened record per resource:
 
 `get_whoop_events(since, until=None, resources=None, limit=500)` is a
 chronological feed across all cached resources — pure cache read, no API
-calls. The window is **half-open**: `updated_at > since AND updated_at < until`.
-The strict `since` bound means you can feed a returned cursor back in as
-the next `since` without re-seeing a row.
+calls. The window is **exclusive on both ends**:
+`updated_at > since AND updated_at < until`. The strict `since` bound
+means you can feed a returned cursor back in as the next `since` without
+re-seeing a row.
 
 Each event wraps a flat record:
 
@@ -328,7 +333,7 @@ server reads, writes, sends, and logs; and how to delete everything
 ## Development
 
 ```bash
-# Run the full test suite (~175 tests).
+# Run the full test suite (183 tests).
 .venv/bin/pytest -q
 
 # Re-record fixtures (live calls, requires creds in env).
@@ -354,7 +359,7 @@ test prevents drift) → update `version` in `pyproject.toml` → tag
 
 ## Versioning
 
-Current version: **0.7.5** (see `src/__version__.py`). Semantic
+Current version: **0.7.6** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits
@@ -364,5 +369,5 @@ Forked from [RomanEvstigneev/whoop-mcp-server](https://github.com/RomanEvstignee
 OAuth (no third-party proxy), the WHOOP v2 API, Pydantic-flattened
 responses, a local SQLite cache with incremental sync, cache-first
 reads, an event feed, exports (CSV/JSONL/Parquet), a `health_check`
-tool, structured JSON logging, and 180+ tests. Licensed MIT — see
+tool, structured JSON logging, and 180+ tests (183 as of 0.7.5). Licensed MIT — see
 [LICENSE](./LICENSE) for both copyright lines.

@@ -3,15 +3,15 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "whoop-mcp-server"
-version = "0.7.5"
+name = "whoop-mcp"
+version = "0.7.6"
 authors = [
     {name = "Ashwanthram K L", email = "k.l.ashwanthram@gmail.com"}
 ]
-description = "WHOOP MCP Server for Claude Desktop - Connect your WHOOP fitness data through Model Context Protocol"
+description = "Read-only WHOOP v2 API access for MCP clients — direct OAuth, local SQLite cache, CSV/JSONL/Parquet exports"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -19,14 +19,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Topic :: Communications",
-    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
-    "Topic :: Scientific/Engineering :: Information Analysis",
-    "Topic :: System :: Networking"
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis"
 ]
 keywords = [
     "whoop",
@@ -64,13 +60,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/romanevstigneev/whoop-mcp-server"
-Documentation = "https://github.com/romanevstigneev/whoop-mcp-server#readme"
-Repository = "https://github.com/romanevstigneev/whoop-mcp-server"
-"Bug Reports" = "https://github.com/romanevstigneev/whoop-mcp-server/issues"
-
-[project.scripts]
-whoop-mcp-setup = "setup:main"
+Homepage = "https://github.com/AshwanthramKL/whoop-mcp"
+Documentation = "https://github.com/AshwanthramKL/whoop-mcp#readme"
+Repository = "https://github.com/AshwanthramKL/whoop-mcp"
+"Bug Reports" = "https://github.com/AshwanthramKL/whoop-mcp/issues"
+Changelog = "https://github.com/AshwanthramKL/whoop-mcp/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -80,7 +74,7 @@ where = ["src"]
 
 [tool.black]
 line-length = 88
-target-version = ['py38', 'py39', 'py310', 'py311']
+target-version = ['py310', 'py311', 'py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -103,7 +97,7 @@ line_length = 88
 known_first_party = ["whoop_mcp_server", "whoop_client", "auth_manager", "config"]
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -120,27 +114,6 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-    "-v",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=src",
-    "--cov-branch",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml"
-]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests"
-]
 
 [tool.coverage.run]
 source = ["src"]

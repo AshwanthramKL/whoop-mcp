@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-04-21
+### Fixed (documentation and metadata)
+- README install commands pointed at the upstream fork repo and referenced a wrong OAuth redirect port (`:8765` vs the actual `:8000`). Updated to the current repo and the correct port.
+- README's `claude mcp add` snippet was missing `--env WHOOP_CLIENT_ID=... --env WHOOP_CLIENT_SECRET=...`, which the server needs to refresh the 1-hour access token. Without those flags, refresh silently failed after an hour of use.
+- README described the event-feed window as "half-open"; it is exclusive on both ends. Terminology corrected.
+- README's test-count reference was stale (~175). Now reads "183 tests".
+- PRIVACY.md listed only four read scopes; the server actually requests six (`read:cycles` and `read:body_measurement` were missing from the doc).
+- `docs/registry-notes.md` had the old project name (`whoop-mcp-server`), the upstream repo URL, and a scopes list missing `read:cycles`. All corrected.
+- `pyproject.toml` declared `requires-python = ">=3.8"` and listed Python 3.8/3.9 classifiers; the code uses `X | Y` union syntax and requires 3.10+. Bumped to `>=3.10` with py310/py311/py312 classifiers.
+- `pyproject.toml` had a `whoop-mcp-setup = setup:main` script entry pointing at the removed `setup.py`. Removed the entry so `pip install .` doesn't crash.
+- `pyproject.toml` project URLs still pointed at the upstream fork. Rewired to this repo.
+- `pyproject.toml` mypy and black configurations targeted Python 3.8. Bumped to 3.10+.
+- `pyproject.toml` had a duplicate `[tool.pytest.ini_options]` block that `pytest.ini` was shadowing. Removed the dead block.
+- Package name in `pyproject.toml` (`whoop-mcp-server`) was stale given the repo rename. Now `whoop-mcp`.
+- CONTRIBUTING.md promised pre-commit hooks, a black/isort/flake8/mypy workflow, GitHub Actions, and issue templates — none exist. Rewritten to describe the actual contributor workflow.
+- `SERVER_VERSION` import fallback in `whoop_mcp_server.py` was pinned to `0.7.1` (a defensive no-op in practice, but drift anyway). Updated.
+
 ## [0.7.5] - 2026-04-21
 ### Changed
 - `pyproject.toml` authors, `src/__init__.py` `__author__`, and `SECURITY.md` security contact switched to the current maintainer. Added a Credits section in README crediting the upstream fork.
