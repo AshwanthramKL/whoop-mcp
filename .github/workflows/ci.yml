@@ -69,3 +69,21 @@ jobs:
         with:
           name: dist
           path: dist/
+
+  # Single "everything passed" check to reference in branch-protection rules.
+  # Matrix jobs report one status per cell, which makes required-check lists
+  # brittle (change the matrix, the rule breaks). Depending on this aggregator
+  # instead keeps the rule config stable across matrix changes.
+  ci-pass:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    steps:
+      - name: Fail if any required job didn't succeed
+        run: |
+          echo "test:  ${{ needs.test.result }}"
+          echo "build: ${{ needs.build.result }}"
+          if [ "${{ needs.test.result }}" != "success" ] \
+          || [ "${{ needs.build.result }}" != "success" ]; then
+            exit 1
+          fi
