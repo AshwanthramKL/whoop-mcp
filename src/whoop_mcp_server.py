@@ -58,8 +58,9 @@ from whoop_models import (
 )
 from whoop_store import WhoopStore
 from whoop_sync import run_sync as _run_sync
+import whoop_export
 
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.5.0"
 
 logger = logging.getLogger("whoop_mcp_server")
 if not logger.handlers:
@@ -80,7 +81,9 @@ mcp = FastMCP(
         "browse date slices without a tool call. All responses are "
         "flattened (score wrappers lifted, durations seconds, energy "
         "kcal, HR keys avg_hr_bpm/max_hr_bpm). Errors are a structured "
-        "envelope, never raised."
+        "envelope, never raised. Call ``export_whoop`` to dump cached "
+        "records to CSV / JSONL / Parquet on disk (requires a prior "
+        "``sync_whoop`` run)."
     ),
 )
 
@@ -900,6 +903,75 @@ def resource_sync_runs(limit: str) -> str:
     except Exception as e:
         return _resource_error("CACHE_ERROR", str(e))
     return json.dumps(rows, default=str)
+
+
+# ---------- Export tool (M4) ----------
+
+
+@mcp.tool()
+async def export_whoop(
+    kind: str,
+    format: str,
+    path: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """Export cached WHOOP records to disk.
+
+    Requires ``sync_whoop()`` to have been run first — exports read from
+    the local cache and never hit the WHOOP API. Supports CSV, JSONL, and
+    Parquet. For ``kind='all'``, writes one file per resource into the
+    given directory (created if missing). For an empty date window the
+    export still writes a file (header-only CSV, empty JSONL, empty
+    Parquet table) so downstream tooling sees a consistent artifact.
+
+    Tip: write exports to a secure location. The file contains your raw
+    fitness data in flat JSON shape (no OAuth secrets, no raw API
+    payloads — just the LLM-friendly flattened rows).
+
+    Args:
+        kind: one of ``cycles``, ``recoveries``, ``sleeps``, ``workouts``,
+            ``all``.
+        format: one of ``csv``, ``jsonl``, ``parquet``.
+        path: output file (for a single kind) or directory (for
+            ``kind='all'``). Parent directory is created if needed.
+        start: inclusive lower-bound date ``YYYY-MM-DD`` (UTC). Defaults
+            to the cache epoch.
+        end: inclusive upper-bound date ``YYYY-MM-DD`` (UTC). Defaults
+            to today.
+        overwrite: if False (default) and the destination has content,
+            returns ``FILE_EXISTS``. If True, replaces silently.
+
+    Returns a dict with shape::
+
+        {"status": "success", "kind": "cycles", "format": "csv",
+         "files": [{"resource": "cycles", "path": "...",
+                    "records": 91, "bytes": 12345}],
+         "range": {"start": "...", "end": "..."}, "warnings": []}
+
+    Errors are returned as ``{"error": {"code": ..., "message": ...,
+    "endpoint": "export_whoop"}}`` with codes ``VALIDATION_ERROR``,
+    ``CACHE_EMPTY``, ``FILE_EXISTS``, or ``EXPORT_ERROR``.
+    """
+    try:
+        store = _get_store()
+    except Exception as e:
+        return _error_payload("CACHE_ERROR", f"store init failed: {e}", "export_whoop")
+
+    try:
+        return whoop_export.export_whoop(
+            store=store,
+            kind=kind,
+            format=format,
+            path=path,
+            start=start,
+            end=end,
+            overwrite=overwrite,
+        )
+    except Exception as e:
+        logger.exception("export_whoop tool failed")
+        return _error_payload("EXPORT_ERROR", f"{type(e).__name__}: {e}", "export_whoop")
 
 
 # ---------- Entry point ----------
