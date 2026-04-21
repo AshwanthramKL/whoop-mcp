@@ -354,7 +354,7 @@ test prevents drift) → update `version` in `pyproject.toml` → tag
 
 ## Versioning
 
-Current version: **0.7.4** (see `src/__version__.py`). Semantic
+Current version: **0.7.5** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits
