@@ -310,7 +310,7 @@ class WhoopClient:
                         f"exhausted retries ({MAX_5XX_RETRIES})",
                         path,
                     )
-                delay = BACKOFF_SCHEDULE_S[min(attempt_5xx, len(BACKOFF_SCHEDULE_S) - 1)]
+                delay = _backoff_delay(attempt_5xx)
                 attempt_5xx += 1
                 _log(
                     "retry",
@@ -339,10 +339,21 @@ class WhoopClient:
 
 
 def _parse_retry_after(header_value: Optional[str]) -> float:
-    """Parse a Retry-After header (seconds). Falls back to 1s."""
+    """Parse a Retry-After header value in seconds. Falls back to 1.0s.
+
+    We intentionally don't implement HTTP-date parsing — WHOOP returns
+    delta-seconds, and falling back to 1s is safer than blocking on an
+    unparseable value.
+    """
     if not header_value:
         return 1.0
     try:
         return float(header_value)
     except (TypeError, ValueError):
         return 1.0
+
+
+def _backoff_delay(attempt_index: int) -> float:
+    """Exponential backoff delay for the ``attempt_index``-th 5xx attempt."""
+    idx = min(attempt_index, len(BACKOFF_SCHEDULE_S) - 1)
+    return BACKOFF_SCHEDULE_S[idx]
