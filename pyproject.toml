@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whoop-mcp-server"
-version = "0.7.4"
+version = "0.7.5"
 authors = [
-    {name = "Roman Evstigneev", email = "evstigneevromanv@gmail.com"}
+    {name = "Ashwanthram K L", email = "k.l.ashwanthram@gmail.com"}
 ]
 description = "WHOOP MCP Server for Claude Desktop - Connect your WHOOP fitness data through Model Context Protocol"
 readme = "README.md"

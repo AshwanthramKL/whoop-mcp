@@ -71,8 +71,8 @@ claude mcp add whoop -- /absolute/path/to/whoop-mcp-server/.venv/bin/python \
 For Claude Desktop, add the equivalent entry to
 `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS),
 pointing `command` at the venv Python and `args` at `src/whoop_mcp_server.py`.
-See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for per-OS paths and
-[docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) for common issues.
+Run `./scripts/fresh_install_check.sh` if you want a clean-env smoke
+of the install path end-to-end (minus the browser OAuth flow).
 
 ## Quick start
 
@@ -354,5 +354,15 @@ test prevents drift) → update `version` in `pyproject.toml` → tag
 
 ## Versioning
 
-Current version: **0.7.1** (see `src/__version__.py`). Semantic
+Current version: **0.7.4** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
+
+## Credits
+
+Forked from [RomanEvstigneev/whoop-mcp-server](https://github.com/RomanEvstigneev/whoop-mcp-server)
+(v0.1.x). Substantially rewritten starting at v0.2.0 to use direct WHOOP
+OAuth (no third-party proxy), the WHOOP v2 API, Pydantic-flattened
+responses, a local SQLite cache with incremental sync, cache-first
+reads, an event feed, exports (CSV/JSONL/Parquet), a `health_check`
+tool, structured JSON logging, and 180+ tests. Licensed MIT — see
+[LICENSE](./LICENSE) for both copyright lines.

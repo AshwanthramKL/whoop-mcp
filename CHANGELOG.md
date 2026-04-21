@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-04-21
+### Changed
+- `pyproject.toml` authors, `src/__init__.py` `__author__`, and `SECURITY.md` security contact switched to the current maintainer. Added a Credits section in README crediting the upstream fork.
+- `LICENSE` retains the original copyright line and adds one for the v0.2.0+ rewrite.
+### Removed
+- `smithery/`, root-level `package.json`, `package-lock.json`, `tsconfig.json`, `smithery.yaml` — the legacy Node/TypeScript Smithery deployment path from v0.1.x. Never tested in v0.2.0+; keeping it alongside the Python surface misled users into thinking there was a supported alternative.
+- `setup.py` — the pre-v0.2.0 interactive OAuth script that pointed at the defunct third-party proxy. `setup_direct_oauth.py` is the sole OAuth bootstrap script now.
+- `docs/INSTALLATION.md`, `docs/TROUBLESHOOTING.md`, `examples/` — stale content that contradicted the rewritten README and referenced the removed install path.
+- `test_claude_integration.md` — pre-v0.2.0 Russian-language Claude Desktop walkthrough, superseded by README.
+### Verified
+- `scripts/fresh_install_check.sh` executed end-to-end against the current HEAD (clean scratch venv, all imports load, `SERVER_VERSION` detected correctly).
+- Auth refresh live-tested: forced `expires_at` into the past, confirmed `get_valid_access_token` (sync) and `get_whoop_profile` (async) both hit the real WHOOP refresh endpoint and obtained fresh access tokens.
+- `git log --all` scanned for credential material — clean across history, blobs, and commit messages.
+
 ## [0.7.4] - 2026-04-21
 ### Fixed
 - Recoveries stored with NULL `start`/`end` because WHOOP v2 recovery payloads carry no own timestamps (recoveries are attached to a cycle). Cache-first reads with a date window returned 0 rows for recoveries even when hundreds existed. Upsert now inherits `start`/`end` from the parent cycle, and a post-sync `backfill_recovery_windows()` pass repairs any rows inserted before their parent cycle existed (race-proof against parallel sync).

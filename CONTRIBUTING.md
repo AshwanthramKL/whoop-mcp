@@ -177,7 +177,7 @@ def test_feature_description():
 
 ### Reporting Security Issues
 
-Please report security vulnerabilities privately to evstigneevromanv@gmail.com rather than opening public issues.
+Please report security vulnerabilities privately per [SECURITY.md](./SECURITY.md) rather than opening public issues.
 
 ## 📋 Pull Request Guidelines
 
