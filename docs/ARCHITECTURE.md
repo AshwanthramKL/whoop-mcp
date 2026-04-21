@@ -205,7 +205,10 @@ to `CHANGELOG.md` under `### Changed` or `### Fixed`.
 
 - No cloud. No Redis. No external queue.
 - No webhooks. (Event feed is poll-driven from the cache.)
-- No write-back to WHOOP. (Read-only by design; see STRATEGY.md for why.)
+- No write-back to WHOOP. Read-only by design — it keeps the trust
+  surface small (an exfil vector can't become a mutation vector) and
+  avoids dependency on reverse-engineered write endpoints, which live
+  outside WHOOP's stable v2 API.
 - No Node / TypeScript layer.
 - No telemetry / analytics of any kind.
 - No multi-tenant support. One user, one WHOOP account, one machine.
