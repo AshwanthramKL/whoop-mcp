@@ -190,7 +190,14 @@ def _write_parquet(path: Path, records: List[Dict[str, Any]]) -> int:
     return len(records)
 
 
-_WRITERS = {"csv": _write_csv, "jsonl": _write_jsonl, "parquet": _write_parquet}
+def _dispatch_writer(fmt: str, path: Path, records: List[Dict[str, Any]]) -> int:
+    """Dispatch to a writer by format name, resolving the module attribute
+    at call time so tests can monkeypatch ``whoop_export._write_csv`` etc.
+    """
+    import sys as _sys
+    mod = _sys.modules[__name__]
+    fn = getattr(mod, f"_write_{fmt}")
+    return fn(path, records)
 
 
 # ---------- main entry point ----------
@@ -215,8 +222,7 @@ def _write_one(
             f"{path} exists and overwrite=False",
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    writer = _WRITERS[fmt]
-    n = writer(path, records)
+    n = _dispatch_writer(fmt, path, records)
     try:
         size = path.stat().st_size
     except OSError:
@@ -280,19 +286,28 @@ def export_whoop(
             resources = [kind]
             out_root = None  # single file mode
 
-        # ----- gather all records first so we can enforce CACHE_EMPTY
-        # before writing anything -----
+        # ----- gather all records first. CACHE_EMPTY fires only when
+        # the resource itself has zero rows in the cache (regardless of
+        # window). A valid date window with no overlap is not an error —
+        # we still write an empty file. -----
         per_resource: List[Tuple[str, List[Dict[str, Any]]]] = []
-        total = 0
+        total_in_window = 0
+        total_in_cache = 0
         for res in resources:
             recs = _read_resource(store, res, start_iso, end_iso)
             per_resource.append((res, recs))
-            total += len(recs)
+            total_in_window += len(recs)
+            # Unfiltered count for this resource
+            try:
+                cache_count = sum(1 for _ in store.iter_records(res, None, None))
+            except Exception:
+                cache_count = 0
+            total_in_cache += cache_count
 
-        if total == 0:
+        if total_in_cache == 0:
             return _error(
                 "CACHE_EMPTY",
-                "no cached records for the requested window; run sync_whoop() first",
+                "no cached records for the requested resource(s); run sync_whoop() first",
             )
 
         # ----- write files -----
