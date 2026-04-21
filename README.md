@@ -324,3 +324,27 @@ This is an unofficial integration with WHOOP. It uses the official WHOOP API but
 - [ ] Data export functionality
 - [ ] Webhook support for real-time updates
 - [ ] Advanced analytics and insights
+
+## M1 Tool Catalog (v0.2.0)
+
+The server exposes the full WHOOP v2 read surface as raw data. All list tools
+accept ISO-8601 `start` / `end` and auto-paginate internally.
+
+| Tool | Purpose |
+|------|---------|
+| `get_whoop_auth_status` | Report OAuth token status (call first if other tools return `AUTH_FAILED`). |
+| `get_whoop_profile` | Authenticated user's WHOOP profile (name, email, user_id). |
+| `get_whoop_body_measurement` | Latest body measurements (height, weight, max HR). |
+| `list_whoop_cycles` | Physiological cycles in a time window; auto-paginated. |
+| `get_whoop_cycle` | Fetch a single cycle by integer ID. |
+| `get_whoop_cycle_sleep` | Sleep record tied to a given cycle. |
+| `get_whoop_cycle_recovery` | Recovery record tied to a given cycle. |
+| `list_whoop_recoveries` | Recovery records (HRV / RHR / recovery score) in a window. |
+| `list_whoop_sleeps` | Sleep activities (incl. naps) in a window. |
+| `get_whoop_sleep` | Fetch a single sleep activity by UUID. |
+| `list_whoop_workouts` | Workouts in a window. |
+| `get_whoop_workout` | Fetch a single workout by UUID. |
+
+Errors are returned as `{"error": {"code", "message", "endpoint"}}` —
+tools never raise. Codes: `AUTH_FAILED`, `RATE_LIMITED`, `NOT_FOUND`,
+`UPSTREAM_ERROR`, `VALIDATION_ERROR`.
