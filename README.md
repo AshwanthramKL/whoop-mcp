@@ -429,3 +429,37 @@ resources so Claude can browse date slices without invoking a tool:
 All resources return `application/json`. Bad inputs produce an error
 body with the same `{"error": {"code","message"}}` shape used by
 tools.
+
+## M4 Exports (v0.5.0)
+
+M4 adds `export_whoop`, a pure data-layer tool that dumps flat cached
+records to disk. It never hits the WHOOP API — run `sync_whoop()` first
+to populate the cache. Supported formats are CSV (RFC 4180, header row
+alphabetically sorted, nested values JSON-encoded), JSONL (one record
+per line, sorted keys for determinism), and Parquet (pyarrow, `snappy`
+compression).
+
+```
+export_whoop(kind, format, path, start=None, end=None, overwrite=False)
+```
+
+- `kind`: `cycles` | `recoveries` | `sleeps` | `workouts` | `all`
+- `format`: `csv` | `jsonl` | `parquet`
+- `path`: output file, or output directory for `kind='all'`. Parent is
+  created if missing.
+- `start` / `end`: inclusive `YYYY-MM-DD` bounds on the primary date.
+  Defaults span the whole cache.
+- `overwrite`: if `False` (default) and the destination has content,
+  returns `FILE_EXISTS`. `True` replaces silently.
+
+For `kind='all'` the tool writes `cycles.*`, `recoveries.*`, `sleeps.*`,
+`workouts.*`, `body_measurements.*`, and `profile_snapshots.*` into the
+given directory. An empty date window still yields a file (header-only
+CSV / empty JSONL / empty Parquet) so downstream tooling sees a
+consistent artifact.
+
+Error codes: `VALIDATION_ERROR`, `CACHE_EMPTY` (run `sync_whoop` first),
+`FILE_EXISTS`, `EXPORT_ERROR`.
+
+Exports contain your raw fitness data in flat JSON shape — no tokens,
+no raw API responses. Write them to a secure location.
