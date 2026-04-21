@@ -269,13 +269,26 @@ class WhoopStore:
 
     def upsert_snapshot(
         self, table: str, raw: Dict[str, Any], flat: Dict[str, Any]
-    ) -> None:
+    ) -> int:
+        """Upsert the single ``current`` row for a snapshot table.
+
+        Returns 1 if the stored raw_json changed (or the row is new),
+        0 if the payload was byte-identical to the stored one. This is
+        how incremental syncs stay idempotent for snapshot resources.
+        """
         if table not in SNAPSHOT_TABLES:
             raise ValueError(f"upsert_snapshot: unknown table {table!r}")
         updated_at = raw.get("updated_at") or _utcnow_iso()
+        raw_blob = json.dumps(raw, default=str, sort_keys=True)
+        flat_blob = json.dumps(flat, default=str, sort_keys=True)
         with self._lock:
             conn = self._connect()
             with conn:
+                existing = conn.execute(
+                    f"SELECT raw_json FROM {table} WHERE id = 'current'"
+                ).fetchone()
+                if existing is not None and existing["raw_json"] == raw_blob:
+                    return 0
                 conn.execute(
                     f"""
                     INSERT INTO {table} (id, updated_at, raw_json, flat_json)
@@ -285,12 +298,9 @@ class WhoopStore:
                         raw_json = excluded.raw_json,
                         flat_json = excluded.flat_json
                     """,
-                    (
-                        updated_at,
-                        json.dumps(raw, default=str),
-                        json.dumps(flat, default=str),
-                    ),
+                    (updated_at, raw_blob, flat_blob),
                 )
+                return 1
 
     def get_latest_snapshot(self, table: str) -> Optional[Dict[str, Any]]:
         if table not in SNAPSHOT_TABLES:

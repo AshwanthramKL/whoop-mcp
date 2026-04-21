@@ -214,22 +214,22 @@ async def _sync_snapshot_resource(
     try:
         raw = await getattr(client, method_name)()
         flat = model_cls.model_validate(raw).flatten()
-        store.upsert_snapshot(table, raw, flat)
+        changed = store.upsert_snapshot(table, raw, flat)
         store.finish_sync_run(
-            run_id, status="success", records_fetched=1, records_upserted=1
+            run_id, status="success", records_fetched=1, records_upserted=changed
         )
         dur_ms = int((time.monotonic() - t0) * 1000)
         _log(
             "sync_resource_done",
             resource=resource,
             records_fetched=1,
-            records_upserted=1,
+            records_upserted=changed,
             duration_ms=dur_ms,
             status="success",
         )
         return {
             "records_fetched": 1,
-            "records_upserted": 1,
+            "records_upserted": changed,
             "cursor_after": None,
             "status": "success",
         }
