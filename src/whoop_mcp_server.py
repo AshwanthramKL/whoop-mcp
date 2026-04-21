@@ -66,7 +66,7 @@ try:
     # Single source of truth: package version.
     from __version__ import __version__ as SERVER_VERSION  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - defensive fallback for odd sys.paths
-    SERVER_VERSION = "0.7.7"
+    SERVER_VERSION = "0.8.0"
 
 # M6: configure structured JSON logging + rotating file handler once at
 # import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
@@ -1470,8 +1470,13 @@ async def health_check(live: bool = True) -> Dict[str, Any]:
 # ---------- Entry point ----------
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console-script entry point. Registered as ``whoop-mcp`` via pyproject."""
     logger.info("Starting WHOOP MCP server v%s", SERVER_VERSION)
     _get_client()
     _get_store()
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

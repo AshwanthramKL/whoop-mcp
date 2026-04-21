@@ -56,7 +56,7 @@ def main() -> int:
     tm = TokenManager()
     token = tm.get_valid_access_token()
     if not token:
-        print("No valid access token available. Did you run setup_direct_oauth.py?", file=sys.stderr)
+        print("No valid access token available. Run `whoop-mcp-oauth` (pip/uvx) or `python src/setup_direct_oauth.py` (git clone).", file=sys.stderr)
         return 1
 
     FIXTURES_DIR.mkdir(parents=True, exist_ok=True)

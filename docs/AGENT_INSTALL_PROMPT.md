@@ -42,7 +42,9 @@ Steps:
 
 3. **OAuth handshake.** Run
       WHOOP_CLIENT_ID=... WHOOP_CLIENT_SECRET=... \
-      .venv/bin/python setup_direct_oauth.py
+      whoop-mcp-oauth     # if installed via pip/uvx
+      # OR, from a git clone:
+      .venv/bin/python src/setup_direct_oauth.py
    (or the equivalent via the uvx/pipx install). A browser tab will
    open to WHOOP. Tell me to authorize. The script catches the callback
    at http://localhost:8000/callback and saves encrypted tokens to
@@ -109,7 +111,7 @@ documents the common failure modes.
 
 ## What this prompt gets right
 
-- **Scopes** match what `setup_direct_oauth.py` actually requests (all six reads + offline).
+- **Scopes** match what `src/setup_direct_oauth.py` actually requests (all six reads + offline).
 - **Redirect URI** matches `src/config.py` (`http://localhost:8000/callback`).
 - **`--env` flags** are included in the `claude mcp add` snippet — the server needs them for token refresh, and every other WHOOP MCP install guide forgets this.
 - **Client detection** — covers Claude Code, Claude Desktop, Cursor, and a generic fallback.

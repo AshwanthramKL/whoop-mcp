@@ -10,7 +10,9 @@ from urllib.parse import urlencode, urlparse, parse_qs
 
 import requests
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# When run as a script, this file sits alongside auth_manager / config in src/
+# (git clone) or as top-level modules after `pip install whoop-mcp`. Either
+# layout lets these imports resolve without sys.path fiddling.
 from auth_manager import TokenManager
 from config import (
     WHOOP_OAUTH_AUTH_URL,

@@ -46,7 +46,7 @@ Read, in order, before your first edit:
 | `src/whoop_logging.py` | JSON formatter + rotating file handler |
 | `src/auth_manager.py` | Encrypted token storage + async refresh lock |
 | `src/config.py` | Endpoints, scopes, paths, env vars |
-| `setup_direct_oauth.py` | One-shot OAuth bootstrap (opens browser, catches callback) |
+| `src/setup_direct_oauth.py` | One-shot OAuth bootstrap (opens browser, catches callback). Exposed as the `whoop-mcp-oauth` console script after `pip install`. |
 | `tests/` | pytest + respx. All HTTP calls mocked; fixtures under `tests/fixtures/` are redacted. |
 | `scripts/fresh_install_check.sh` | Manual smoke for fresh-install path |
 | `docs/ARCHITECTURE.md` | One-page system map |

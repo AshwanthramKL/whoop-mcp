@@ -37,7 +37,7 @@ pip install -r requirements.txt
 ## Runtime prerequisites
 
 - WHOOP developer app (client ID + secret).
-- Completed one-shot OAuth flow: `python setup_direct_oauth.py`.
+- Completed one-shot OAuth flow: `whoop-mcp-oauth` (after `pip install whoop-mcp`) or `python src/setup_direct_oauth.py` (from source).
 - Environment variables: `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`.
 
 ## WHOOP OAuth scopes

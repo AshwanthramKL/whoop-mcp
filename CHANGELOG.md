@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-22
+### Added
+- **Packaging for PyPI.** `[project.scripts]` entries create two console scripts: `whoop-mcp` (starts the MCP server) and `whoop-mcp-oauth` (runs the one-shot OAuth flow). Install with `pip install whoop-mcp`, or run ephemerally via `uvx --from whoop-mcp whoop-mcp`. No clone, no venv, no absolute paths required in MCP client registration.
+- **`server.json` at repo root** — MCP Registry manifest with `mcpName = "io.github.ashwanthramkl/whoop-mcp"`, PyPI package identifier, stdio transport, and documented environment variables (required: `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`; optional: `WHOOP_REDIRECT_URI`, `WHOOP_LOG_LEVEL`, `WHOOP_LOG_FILE`, `WHOOP_LOG_JSON`). Ready for submission when the next intake window opens.
+- **`whoop-insights` skill** bundled under `skills/whoop-insights/`. Pulls 30 days from the cache, computes personal baselines (HRV / recovery / RHR / sleep / strain) with 7-day vs 30-day deltas, flags anomalies with evidence, runs two correlations (sleep → next-day recovery, strain → next-day recovery), and optionally generates a self-contained HTML dashboard (`skills/whoop-insights/dashboard_template.html`) with Chart.js visualizations. Explicit anti-fabrication rules: every claim cites a date and a number.
+- `skills/README.md` — skills catalogue and installation notes for Claude Code / Cursor / Windsurf.
+
+### Changed
+- `setup_direct_oauth.py` moved from repo root to `src/setup_direct_oauth.py` so it's reachable from `[project.scripts]` after `pip install`. The standalone `python setup_direct_oauth.py` invocation continues to work for the from-source install path; new install uses `whoop-mcp-oauth`.
+- `whoop_mcp_server.py` gained a `main()` function (the previous `if __name__ == "__main__"` block now delegates to it) so the console script can enter cleanly.
+- README install section rewritten: `uvx` one-liner is now the primary path; from-source remains for contributors.
+
+### Packaging notes
+- `py-modules` enumerated in `pyproject.toml` under `[tool.setuptools]` so the flat `src/*.py` layout installs correctly (previously `packages.find` found nothing, shipping a metadata-only wheel).
+- Wheel verified locally: `whoop_mcp-0.8.0-py3-none-any.whl` contains all 11 modules; both console scripts resolve; `import whoop_mcp_server` succeeds in a fresh venv.
+
 ## [0.7.7] - 2026-04-22
 ### Added
 - `AGENTS.md` at repo root — load-bearing conventions for AI agents (Claude Code, Cursor, Windsurf, Zed, Aider) working on this codebase. File layout, error-envelope discipline, TDD loop, "don't" list, release flow.

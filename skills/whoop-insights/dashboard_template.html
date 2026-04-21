@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WHOOP Insights — {{RANGE}}</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --border: #21262d;
+    --fg: #e6edf3; --dim: #8b949e; --blue: #2f81f7;
+    --green: #3fb950; --amber: #d29922; --red: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+    margin: 0; padding: 32px; display: flex; justify-content: center; }
+  .wrap { width: 100%; max-width: 1080px; }
+  h1 { margin: 0 0 6px; font-weight: 600; font-size: 22px; }
+  .sub { color: var(--dim); margin: 0 0 28px; font-size: 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(4, 1fr); margin-bottom: 28px; }
+  .kpi { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px; }
+  .kpi .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .kpi .delta { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .kpi .delta.up { color: var(--green); }
+  .kpi .delta.down { color: var(--red); }
+  .chart-card { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 18px 20px; margin-bottom: 16px; }
+  .chart-card h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+  .chart-card .note { color: var(--dim); font-size: 11px; margin-bottom: 10px; }
+  canvas { width: 100% !important; height: 280px !important; }
+  .two-col { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+  .anom { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; }
+  .anom h3 { margin: 0 0 10px; font-size: 14px; }
+  .anom-row { display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+  .anom-row:first-of-type { border-top: 0; }
+  .anom-date { color: var(--dim); font-size: 12px; width: 100px; flex-shrink: 0; }
+  .anom-desc { font-size: 13px; }
+  .foot { color: var(--dim); font-size: 11px; text-align: center; margin-top: 28px;
+    border-top: 1px solid var(--border); padding-top: 16px; }
+  code { background: var(--border); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WHOOP Insights — {{RANGE}}</h1>
+  <p class="sub">Generated locally · {{N_RECORDS}} records · {{N_EXCLUDED}} non-SCORED excluded · no data left your machine</p>
+
+  <div class="grid" id="kpis"></div>
+
+  <div class="two-col">
+    <div class="chart-card"><h3>Recovery score</h3><p class="note">Daily, SCORED only.</p><canvas id="ch-recovery"></canvas></div>
+    <div class="chart-card"><h3>HRV (ms)</h3><p class="note">Daily resting HRV.</p><canvas id="ch-hrv"></canvas></div>
+  </div>
+
+  <div class="two-col">
+    <div class="chart-card"><h3>Sleep hours</h3><p class="note">In-bed time per night, with stages stacked below.</p><canvas id="ch-sleep"></canvas></div>
+    <div class="chart-card"><h3>Cycle strain</h3><p class="note">Daily aggregate strain.</p><canvas id="ch-strain"></canvas></div>
+  </div>
+
+  <div class="chart-card"><h3>Sleep → next-day recovery</h3><p class="note">Each point: one night's in-bed hours vs the following day's recovery score.</p><canvas id="ch-scatter"></canvas></div>
+
+  <div class="anom" id="anom-card">
+    <h3>Anomalies flagged (most recent first)</h3>
+    <div id="anom-list"></div>
+  </div>
+
+  <p class="foot">whoop-mcp · local dashboard · data never leaves this machine · open <code>rm -rf ~/.whoop-mcp-server</code> to wipe everything</p>
+</div>
+
+<script>
+// Replace this block during generation.
+const DATA = {{DATA_JSON}};
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const palette = { blue: "#2f81f7", green: "#3fb950", amber: "#d29922", red: "#f85149", dim: "#8b949e" };
+const gridColor = "rgba(139,148,158,0.18)";
+Chart.defaults.color = "#c9d1d9";
+Chart.defaults.borderColor = gridColor;
+
+// --- KPIs ------------------------------------------------------------------
+const kpis = document.getElementById("kpis");
+function kpi(label, value, delta, good) {
+  const d = delta !== undefined && delta !== null
+    ? `<div class="delta ${good === null ? '' : (good ? 'up' : 'down')}">${delta > 0 ? '+' : ''}${delta} vs 30d</div>`
+    : "";
+  return `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div>${d}</div>`;
+}
+const k = DATA.kpis || {};
+kpis.innerHTML = [
+  kpi("Recovery 7d", k.recovery_7d ?? "—", k.recovery_delta, k.recovery_delta >= 0),
+  kpi("HRV 7d (ms)", k.hrv_7d ?? "—", k.hrv_delta, k.hrv_delta >= 0),
+  kpi("Sleep 7d (h)", k.sleep_7d ?? "—", k.sleep_delta, k.sleep_delta >= 0),
+  kpi("Strain 7d", k.strain_7d ?? "—", k.strain_delta, null),
+].join("");
+
+// --- Line charts -----------------------------------------------------------
+function lineChart(id, labels, series, color) {
+  const ctx = document.getElementById(id);
+  if (!ctx || !labels || !labels.length) return;
+  new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets: series.map(s => ({
+      label: s.label, data: s.data, borderColor: s.color || color,
+      backgroundColor: (s.color || color) + "22", tension: 0.3, pointRadius: 2,
+    }))},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: series.length > 1 } },
+      scales: {
+        x: { grid: { color: gridColor } },
+        y: { grid: { color: gridColor }, beginAtZero: false },
+      },
+    },
+  });
+}
+
+lineChart("ch-recovery", DATA.dates, [{label: "Recovery", data: DATA.recovery || []}], palette.green);
+lineChart("ch-hrv", DATA.dates, [{label: "HRV (ms)", data: DATA.hrv || []}], palette.blue);
+lineChart("ch-strain", DATA.dates, [{label: "Strain", data: DATA.strain || []}], palette.amber);
+
+// --- Stacked sleep chart ---------------------------------------------------
+{
+  const ctx = document.getElementById("ch-sleep");
+  if (ctx && DATA.dates && DATA.sleep_stages) {
+    new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: DATA.dates,
+        datasets: [
+          { label: "Deep (h)", data: DATA.sleep_stages.deep || [], backgroundColor: "#1f6feb" },
+          { label: "REM (h)", data: DATA.sleep_stages.rem || [], backgroundColor: "#388bfd" },
+          { label: "Light (h)", data: DATA.sleep_stages.light || [], backgroundColor: "#58a6ff" },
+          { label: "Awake (h)", data: DATA.sleep_stages.awake || [], backgroundColor: "#30363d" },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { stacked: true, grid: { color: gridColor } },
+          y: { stacked: true, grid: { color: gridColor } },
+        },
+      },
+    });
+  }
+}
+
+// --- Correlation scatter ---------------------------------------------------
+{
+  const ctx = document.getElementById("ch-scatter");
+  const pts = DATA.sleep_vs_recovery || [];
+  if (ctx && pts.length) {
+    new Chart(ctx, {
+      type: "scatter",
+      data: { datasets: [{
+        label: "Sleep hrs vs next-day recovery",
+        data: pts.map(p => ({x: p.sleep_hours, y: p.recovery_next_day})),
+        backgroundColor: palette.blue + "cc",
+      }]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { title: { display: true, text: "Sleep (hours)" }, grid: { color: gridColor } },
+          y: { title: { display: true, text: "Next-day recovery" }, grid: { color: gridColor } },
+        },
+      },
+    });
+  }
+}
+
+// --- Anomalies list --------------------------------------------------------
+const anomList = document.getElementById("anom-list");
+const anomCard = document.getElementById("anom-card");
+const anoms = DATA.anomalies || [];
+if (!anoms.length) {
+  anomCard.style.display = "none";
+} else {
+  anomList.innerHTML = anoms.map(a => `
+    <div class="anom-row">
+      <div class="anom-date">${a.date}</div>
+      <div class="anom-desc">${a.text}</div>
+    </div>`).join("");
+}
+</script>
+</body>
+</html>

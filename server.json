@@ -1,0 +1,62 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.ashwanthramkl/whoop-mcp",
+  "description": "Read-only WHOOP v2 API access for MCP clients — local SQLite cache, incremental sync, CSV/JSONL/Parquet exports, event feed, 17 tools, 9 MCP resources.",
+  "repository": {
+    "url": "https://github.com/AshwanthramKL/whoop-mcp",
+    "source": "github"
+  },
+  "version": "0.8.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "whoop-mcp",
+      "version": "0.8.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WHOOP_CLIENT_ID",
+          "description": "Client ID from your WHOOP developer app (https://developer-dashboard.whoop.com/apps/create).",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "WHOOP_CLIENT_SECRET",
+          "description": "Client secret from your WHOOP developer app. Used for OAuth token refresh.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "WHOOP_REDIRECT_URI",
+          "description": "OAuth redirect URI. Defaults to http://localhost:8000/callback — only change if you registered a different URI.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "http://localhost:8000/callback"
+        },
+        {
+          "name": "WHOOP_LOG_LEVEL",
+          "description": "Log level (DEBUG / INFO / WARNING / ERROR). Default INFO.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "INFO"
+        },
+        {
+          "name": "WHOOP_LOG_FILE",
+          "description": "Path to the rotating log file. Set to empty string to disable file logging. Default ~/.whoop-mcp-server/logs/whoop-mcp.log.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "WHOOP_LOG_JSON",
+          "description": "Structured JSON logs (true) vs human-readable (false). Default true.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "true"
+        }
+      ],
+      "runtimeHint": "uvx"
+    }
+  ]
+}

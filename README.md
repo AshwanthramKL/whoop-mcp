@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-6e6eff.svg)](https://modelcontextprotocol.io)
 [![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen.svg)](./tests)
-[![Version](https://img.shields.io/badge/version-0.7.7-informational.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.0-informational.svg)](./CHANGELOG.md)
 
 A local Model Context Protocol (MCP) server that gives an LLM **read-only**
 access to your WHOOP fitness data. Authentication is direct OAuth against
@@ -14,7 +14,14 @@ All records are mirrored into a local SQLite cache at
 except for the authenticated calls the server itself makes to the WHOOP
 v2 API.
 
-Current version: **0.7.7** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **0.8.0** — see [CHANGELOG.md](./CHANGELOG.md).
+
+> **Pre-1.0 status.** The API surface (tool names, response shapes, error
+> codes) is stabilizing but not frozen. Breaking changes may land in
+> `0.x` minor bumps during dogfooding. Patch bumps (`0.8.x`) are
+> bugfix-only. 1.0.0 will be cut when the surface has been stable for
+> 2+ weeks of real use. Pin the minor version in CI if you're building
+> on top of this.
 
 > **Just want to try it?** Copy the prompt in
 > [docs/AGENT_INSTALL_PROMPT.md](./docs/AGENT_INSTALL_PROMPT.md), paste
@@ -28,8 +35,10 @@ Current version: **0.7.7** — see [CHANGELOG.md](./CHANGELOG.md).
 ## Table of contents
 
 - [What this is](#what-this-is)
-- [Install with your agent](#install-with-your-agent-recommended)
-- [Install manually](#install-manually)
+- [Install (one line via uvx)](#install-one-line-via-uvx)
+- [Install with your agent](#install-with-your-agent)
+- [Install from source](#install-from-source-for-development)
+- [Analysis skill: whoop-insights](#analysis-skill-whoop-insights)
 - [Quick start](#quick-start)
 - [Tool catalog](#tool-catalog)
 - [MCP resources](#mcp-resources)
@@ -54,48 +63,49 @@ third-party server. The WHOOP records you fetch are written to a local
 SQLite cache (mode `0o600`) so subsequent reads are free and offline, and
 the cache file never leaves your machine.
 
-## Install with your agent (recommended)
-
-Paste the prompt in [docs/AGENT_INSTALL_PROMPT.md](./docs/AGENT_INSTALL_PROMPT.md)
-into your MCP-aware agent (Claude Code, Claude Desktop, Cursor,
-Windsurf, Zed, Aider, …). The agent will clone, venv, run OAuth, and
-register the server with your client. You only have to authorize in a
-browser tab once.
-
-## Install manually
-
-Five-minute path, assuming Python 3.10+.
+## Install (one line via uvx)
 
 ```bash
-# 1. Clone and create a venv.
-git clone https://github.com/AshwanthramKL/whoop-mcp.git
-cd whoop-mcp
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# 2. Create a WHOOP developer app.
+# 1. Create a WHOOP developer app (one-time, free, self-serve):
 #    https://developer-dashboard.whoop.com/apps/create
 #    Redirect URI:  http://localhost:8000/callback
 #    Scopes:        read:profile read:body_measurement read:recovery
 #                   read:cycles read:sleep read:workout offline
 
-# 3. Paste your credentials into the environment.
-export WHOOP_CLIENT_ID="<your client id>"
-export WHOOP_CLIENT_SECRET="<your client secret>"
+# 2. One-shot OAuth — opens browser, catches callback, saves encrypted tokens.
+WHOOP_CLIENT_ID="<your client id>" \
+WHOOP_CLIENT_SECRET="<your client secret>" \
+  uvx --from whoop-mcp whoop-mcp-oauth
 
-# 4. Run the one-shot OAuth flow (opens a browser tab, local callback,
-#    saves encrypted tokens to ~/.whoop-mcp-server/tokens.json).
-python setup_direct_oauth.py
-
-# 5. Register with Claude. The --env flags are required — the server uses
-#    them to refresh tokens when the 1-hour access token expires.
+# 3. Register with Claude Code. The --env flags are required so the
+#    server can refresh tokens when the 1-hour access token expires.
 claude mcp add whoop --scope user \
   --env WHOOP_CLIENT_ID="$WHOOP_CLIENT_ID" \
   --env WHOOP_CLIENT_SECRET="$WHOOP_CLIENT_SECRET" \
-  -- /absolute/path/to/whoop-mcp/.venv/bin/python \
-  /absolute/path/to/whoop-mcp/src/whoop_mcp_server.py
+  -- uvx --from whoop-mcp whoop-mcp
 ```
+
+No clone, no venv, no absolute paths. Don't have `uv`? Install it once:
+`curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`).
+
+## Install with your agent
+
+Paste the prompt in [docs/AGENT_INSTALL_PROMPT.md](./docs/AGENT_INSTALL_PROMPT.md)
+into any MCP-aware agent (Claude Code, Claude Desktop, Cursor,
+Windsurf, Zed, Aider). The agent will run the install for you.
+
+## Install from source (for development)
+
+```bash
+git clone https://github.com/AshwanthramKL/whoop-mcp.git
+cd whoop-mcp
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+.venv/bin/pytest -q   # 183 tests, ~6s, all respx-mocked
+```
+
+Then register with `-- /abs/path/to/whoop-mcp/.venv/bin/python /abs/path/to/whoop-mcp/src/whoop_mcp_server.py`.
 
 For Claude Desktop, add the equivalent entry to
 `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS),
@@ -114,6 +124,25 @@ Once the server is registered, try these prompts:
    joined cycle + recovery + primary sleep + workouts record.
 3. **Export.** "Export all my cached workouts to `~/whoop-workouts.csv`."
    Claude calls `export_whoop(kind="workouts", format="csv", path="...")`.
+
+## Analysis skill: whoop-insights
+
+Bundled with the repo: [skills/whoop-insights](./skills/whoop-insights/SKILL.md).
+Ask your agent:
+
+> *"How am I doing? Run the whoop-insights skill."*
+> *"Generate my weekly WHOOP report."*
+> *"Am I overtraining? Check the last 30 days."*
+
+The skill pulls 30 days from the cache, computes personal baselines
+(HRV, recovery, sleep, strain), flags anomalies with evidence, runs two
+correlations (sleep→next-day-recovery, strain→next-day-recovery), and
+optionally generates a self-contained HTML dashboard with Chart.js
+visualizations. Every claim cites a specific date and a specific number
+— the skill is instructed never to fabricate.
+
+To use it outside this repo, copy `skills/whoop-insights/` into your
+agent's skills directory (e.g. `~/.claude/skills/` for Claude Code).
 
 ## Tool catalog
 
@@ -338,7 +367,8 @@ empty Parquet) so downstream tooling sees a consistent artifact.
   access token is within 5 minutes of expiry. An async refresh lock
   prevents stampedes when multiple in-flight requests discover the same
   expired token. If refresh fails beyond recovery, re-run
-  `python setup_direct_oauth.py`.
+  `whoop-mcp-oauth` (after `pip install`) or
+  `.venv/bin/python src/setup_direct_oauth.py` (from source).
 - **Rate limiting.** The client respects `Retry-After` on 429s and
   retries with exponential backoff. After the retry budget, the call
   surfaces as `RATE_LIMITED` — tools never raise.
@@ -400,7 +430,7 @@ call is respx-mocked so you can iterate offline.
 
 ## Versioning
 
-Current version: **0.7.7** (see `src/__version__.py`). Semantic
+Current version: **0.8.0** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits
