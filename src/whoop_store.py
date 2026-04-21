@@ -395,6 +395,97 @@ class WhoopStore:
         for r in rows:
             yield json.loads(r["flat_json"])
 
+    def iter_events(
+        self,
+        resources: Iterable[str],
+        since: str,
+        until: str,
+        limit: int,
+    ) -> Iterator[Dict[str, Any]]:
+        """Yield ``{resource, id, updated_at, record}`` dicts across resources.
+
+        Half-open window: ``updated_at > since AND updated_at < until`` —
+        the "since" bound is strict so callers can pass the previous
+        ``next_cursor`` and not re-see events at that timestamp.
+
+        Results are sorted by ``updated_at`` ASC, then by ``resource`` ASC
+        as tiebreaker. Iteration stops after yielding ``limit + 1`` rows so
+        the caller can detect truncation cheaply (expects ``limit + 1``
+        when more events exist beyond the cap).
+
+        ``resources`` may mix record tables (``cycles``/``recoveries``/
+        ``sleeps``/``workouts``) with snapshot aliases (``body_measurement``
+        -> ``body_measurements``, ``profile`` -> ``profile_snapshots``).
+        Unknown names raise ``ValueError``.
+
+        All SQL is parameterized and table names are drawn from a fixed
+        allowlist.
+        """
+        # Map public resource names -> physical table names.
+        alias = {
+            "cycles": "cycles",
+            "recoveries": "recoveries",
+            "sleeps": "sleeps",
+            "workouts": "workouts",
+            "body_measurement": "body_measurements",
+            "body_measurements": "body_measurements",
+            "profile": "profile_snapshots",
+            "profile_snapshots": "profile_snapshots",
+        }
+        # Record-table resource names we emit on events.
+        public_of = {
+            "cycles": "cycles",
+            "recoveries": "recoveries",
+            "sleeps": "sleeps",
+            "workouts": "workouts",
+            "body_measurements": "body_measurement",
+            "profile_snapshots": "profile",
+        }
+
+        tables: List[Tuple[str, str]] = []  # (table, public_resource)
+        for r in resources:
+            if r not in alias:
+                raise ValueError(f"iter_events: unknown resource {r!r}")
+            t = alias[r]
+            pub = public_of[t]
+            if (t, pub) not in tables:
+                tables.append((t, pub))
+
+        if not tables:
+            return
+
+        # Build a UNION ALL query so SQLite does the sort + limit for us.
+        parts: List[str] = []
+        params: List[Any] = []
+        for table, pub in tables:
+            parts.append(
+                f"SELECT ? AS resource, id AS id, updated_at AS updated_at, "
+                f"flat_json AS flat_json FROM {table} "
+                f"WHERE updated_at > ? AND updated_at < ?"
+            )
+            params.extend([pub, since, until])
+        sql = (
+            " UNION ALL ".join(parts)
+            + " ORDER BY updated_at ASC, resource ASC LIMIT ?"
+        )
+        params.append(int(limit) + 1)
+
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(sql, params).fetchall()
+
+        for row in rows:
+            try:
+                record = json.loads(row["flat_json"])
+            except (TypeError, ValueError):
+                record = {}
+            yield {
+                "resource": row["resource"],
+                "id": row["id"],
+                "updated_at": row["updated_at"],
+                "record": record,
+            }
+
     def query_by_cycle_id(self, table: str, *, cycle_id: int) -> List[Dict[str, Any]]:
         if table not in CYCLE_CHILD_TABLES:
             raise ValueError(f"query_by_cycle_id: unknown table {table!r}")
