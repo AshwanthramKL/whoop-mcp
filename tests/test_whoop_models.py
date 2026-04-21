@@ -159,10 +159,10 @@ def test_sleep_flatten(fixture_loader):
     assert flat["sleep_cycle_count"] == 5
     assert flat["disturbance_count"] == 9
 
-    # Score percentages kept as-is
-    assert flat["sleep_efficiency_percentage"] == pytest.approx(94.837456)
-    assert flat["sleep_performance_percentage"] == 83.0
-    assert flat["sleep_consistency_percentage"] == 78.0
+    # Score percentages kept as-is (with _pct unit-bearing rename)
+    assert flat["sleep_efficiency_pct"] == pytest.approx(94.837456)
+    assert flat["sleep_performance_pct"] == 83.0
+    assert flat["sleep_consistency_pct"] == 78.0
     assert flat["respiratory_rate"] == pytest.approx(13.9453125)
     assert flat["score_state"] == "SCORED"
 
