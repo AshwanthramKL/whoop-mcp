@@ -33,6 +33,7 @@ async def test_health_check_shape(tmp_path, monkeypatch):
         "cache_readable",
         "cache_writable",
         "schema_version",
+        "pypi_update_available",
     }
     for check in r["checks"].values():
         assert "status" in check
@@ -134,3 +135,76 @@ def no_sleep_for_health(monkeypatch):
         return None
 
     monkeypatch.setattr(wc.asyncio, "sleep", _f)
+
+
+# ---------- pypi_update_available check ----------
+
+
+@pytest.mark.asyncio
+async def test_pypi_update_check_skipped_when_disabled(monkeypatch):
+    monkeypatch.setenv("WHOOP_UPDATE_CHECK", "false")
+    r = await server.health_check(live=True)
+    chk = r["checks"]["pypi_update_available"]
+    assert chk["status"] == "skipped"
+    assert "disabled" in chk["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_pypi_update_check_skipped_when_live_false(monkeypatch):
+    monkeypatch.setenv("WHOOP_UPDATE_CHECK", "true")
+    r = await server.health_check(live=False)
+    assert r["checks"]["pypi_update_available"]["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_pypi_update_check_ok_when_up_to_date(monkeypatch):
+    monkeypatch.setenv("WHOOP_UPDATE_CHECK", "true")
+    respx.get("https://pypi.org/pypi/whoop-mcp/json").mock(
+        return_value=httpx.Response(200, json={"info": {"version": server.SERVER_VERSION}})
+    )
+    # Also stub out the /user/profile/basic call so the api_reachable check
+    # doesn't try to hit a real endpoint.
+    respx.get(f"{V2}/user/profile/basic").mock(
+        return_value=httpx.Response(200, json={"user_id": 1})
+    )
+    r = await server.health_check(live=True)
+    chk = r["checks"]["pypi_update_available"]
+    assert chk["status"] == "ok"
+    assert chk["latest"] == server.SERVER_VERSION
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_pypi_update_check_warns_when_newer_available(monkeypatch):
+    monkeypatch.setenv("WHOOP_UPDATE_CHECK", "true")
+    # Bump every component by 1 so _tup comparison says newer.
+    parts = [int(p) for p in server.SERVER_VERSION.split(".") if p.isdigit()]
+    parts[-1] += 1
+    newer = ".".join(str(p) for p in parts)
+    respx.get("https://pypi.org/pypi/whoop-mcp/json").mock(
+        return_value=httpx.Response(200, json={"info": {"version": newer}})
+    )
+    respx.get(f"{V2}/user/profile/basic").mock(
+        return_value=httpx.Response(200, json={"user_id": 1})
+    )
+    r = await server.health_check(live=True)
+    chk = r["checks"]["pypi_update_available"]
+    assert chk["status"] == "warn"
+    assert chk["installed"] == server.SERVER_VERSION
+    assert chk["latest"] == newer
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_pypi_update_check_warns_on_error(monkeypatch):
+    monkeypatch.setenv("WHOOP_UPDATE_CHECK", "true")
+    respx.get("https://pypi.org/pypi/whoop-mcp/json").mock(
+        return_value=httpx.Response(503, text="down")
+    )
+    respx.get(f"{V2}/user/profile/basic").mock(
+        return_value=httpx.Response(200, json={"user_id": 1})
+    )
+    r = await server.health_check(live=True)
+    chk = r["checks"]["pypi_update_available"]
+    assert chk["status"] == "warn"

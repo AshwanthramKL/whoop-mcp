@@ -63,7 +63,7 @@ try:
     # Single source of truth: package version.
     from __version__ import __version__ as SERVER_VERSION  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - defensive fallback for odd sys.paths
-    SERVER_VERSION = "0.8.1"
+    SERVER_VERSION = "0.8.2"
 
 # M6: configure structured JSON logging + rotating file handler once at
 # import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
@@ -1374,6 +1374,61 @@ def _check_schema_version() -> dict[str, Any]:
     )
 
 
+async def _check_pypi_update() -> dict[str, Any]:
+    """Check PyPI for a newer release of whoop-mcp. Opt-out via env.
+
+    MCP clients pin servers by command path and never auto-update them. A
+    user can run happily on a stale version indefinitely without knowing.
+    This check surfaces that state in ``health_check``, which is exactly
+    where users already look when something feels off.
+
+    Respects ``WHOOP_UPDATE_CHECK=false`` to fully skip the request (for
+    air-gapped installs or users who hate phone-home behavior). Never
+    blocks for long — 3s timeout.
+    """
+    if os.getenv("WHOOP_UPDATE_CHECK", "true").lower() in {"false", "0", "no", "off"}:
+        return _component("skipped", "WHOOP_UPDATE_CHECK disabled")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get("https://pypi.org/pypi/whoop-mcp/json")
+        if resp.status_code != 200:
+            return _component("warn", f"pypi returned {resp.status_code}", latest=None)
+        latest = str(resp.json().get("info", {}).get("version", "")).strip()
+    except Exception as e:
+        return _component("warn", f"pypi query failed: {type(e).__name__}", latest=None)
+
+    if not latest:
+        return _component("warn", "pypi response missing version", latest=None)
+    if latest == SERVER_VERSION:
+        return _component("ok", f"running the latest release ({SERVER_VERSION})", latest=latest)
+
+    # Very rough "is-newer" — PyPI versions are PEP 440; for semver-ish
+    # 0.x.y we compare tuple of ints. Fallback to string != comparison.
+    def _tup(v: str) -> tuple[int, ...]:
+        return tuple(int(p) for p in v.split(".") if p.isdigit())
+
+    try:
+        is_newer = _tup(latest) > _tup(SERVER_VERSION)
+    except Exception:
+        is_newer = latest != SERVER_VERSION
+
+    if is_newer:
+        return _component(
+            "warn",
+            f"newer release available: {SERVER_VERSION} -> {latest}. Update per README § Updating.",
+            installed=SERVER_VERSION,
+            latest=latest,
+        )
+    return _component(
+        "ok",
+        f"running {SERVER_VERSION}; PyPI latest is {latest} (older or equal)",
+        installed=SERVER_VERSION,
+        latest=latest,
+    )
+
+
 @mcp.tool()
 async def health_check(live: bool = True) -> dict[str, Any]:
     """Run server health checks and return a structured status dict.
@@ -1386,15 +1441,20 @@ async def health_check(live: bool = True) -> dict[str, Any]:
         {
           "status": "healthy" | "degraded" | "unhealthy",
           "checks": {
-            "auth":           {"status": "ok|warn|fail", "detail": "...", ...},
-            "api_reachable":  {"status": "ok|warn|fail|skipped", "detail": "...", ...},
-            "cache_readable": {"status": "ok|warn|fail", "detail": "...", "rows_total": N},
-            "cache_writable": {"status": "ok|warn|fail", "detail": "..."},
-            "schema_version": {"status": "ok|warn|fail", "detail": "user_version=..."}
+            "auth":                  {"status": "ok|warn|fail", "detail": "...", ...},
+            "api_reachable":         {"status": "ok|warn|fail|skipped", "detail": "...", ...},
+            "cache_readable":        {"status": "ok|warn|fail", "detail": "...", "rows_total": N},
+            "cache_writable":        {"status": "ok|warn|fail", "detail": "..."},
+            "schema_version":        {"status": "ok|warn|fail", "detail": "user_version=..."},
+            "pypi_update_available": {"status": "ok|warn|skipped", "detail": "...",
+                                      "installed": "0.8.1", "latest": "0.8.2"}
           },
           "server_version": "...",
           "timestamp": "<utc iso>"
         }
+
+    The ``pypi_update_available`` component runs only when ``live=True``
+    and can be disabled entirely with env ``WHOOP_UPDATE_CHECK=false``.
 
     Never raises. Never emits tokens or PII.
     """
@@ -1419,6 +1479,15 @@ async def health_check(live: bool = True) -> dict[str, Any]:
         checks["schema_version"] = _check_schema_version()
     except Exception as e:
         checks["schema_version"] = _component("fail", f"{type(e).__name__}")
+    # Update check is live-only (it makes an HTTP request to pypi.org).
+    # Skipped on ``live=False`` to keep fast-mode offline.
+    if live:
+        try:
+            checks["pypi_update_available"] = await _check_pypi_update()
+        except Exception as e:  # pragma: no cover
+            checks["pypi_update_available"] = _component("warn", f"{type(e).__name__}")
+    else:
+        checks["pypi_update_available"] = _component("skipped", "live=False")
 
     worst = max(_rank(c["status"]) for c in checks.values())
     if worst == 0:

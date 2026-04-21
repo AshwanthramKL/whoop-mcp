@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: WHOOP API questions
+    url: https://developer.whoop.com/docs
+    about: >
+      Questions about the WHOOP v2 API itself (scopes, rate limits, data shape)
+      belong in WHOOP's developer docs, not here.
+  - name: MCP protocol questions
+    url: https://modelcontextprotocol.io
+    about: >
+      Questions about the MCP protocol, how stdio clients work, or how to write
+      your own MCP server belong upstream.

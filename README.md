@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-6e6eff.svg)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen.svg)](./tests)
+[![Tests](https://img.shields.io/badge/tests-188%20passing-brightgreen.svg)](./tests)
 
 A local Model Context Protocol (MCP) server that gives an LLM **read-only**
 access to your WHOOP fitness data. Authentication is direct OAuth against
@@ -15,7 +15,7 @@ All records are mirrored into a local SQLite cache at
 except for the authenticated calls the server itself makes to the WHOOP
 v2 API.
 
-Current version: **0.8.1** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **0.8.2** — see [CHANGELOG.md](./CHANGELOG.md).
 
 > **Pre-1.0 status.** The API surface (tool names, response shapes, error
 > codes) is stabilizing but not frozen. Breaking changes may land in
@@ -47,6 +47,8 @@ Current version: **0.8.1** — see [CHANGELOG.md](./CHANGELOG.md).
 - [Sync model](#sync-model)
 - [Event feed](#event-feed)
 - [Exports](#exports)
+- [What's not supported](#whats-not-supported)
+- [Updating](#updating)
 - [Operations](#operations)
 - [Security and privacy](#security-and-privacy)
 - [Development](#development)
@@ -353,6 +355,45 @@ Run `sync_whoop()` first.
 An empty window still yields a file (header-only CSV / empty JSONL /
 empty Parquet) so downstream tooling sees a consistent artifact.
 
+## What's not supported
+
+Spelled out so nobody wastes an issue.
+
+| Ask | Why not |
+|-----|---------|
+| `claude.ai` (the web app) | We ship as a **stdio** MCP (local subprocess). `claude.ai` wants a remote HTTPS MCP. A hosted deployment would also break our single-user / local-only threat model. |
+| Mobile Claude apps | Same stdio constraint. |
+| Writing back to WHOOP (logging activities, updating weight, etc.) | Read-only by design. Adding writes would require reverse-engineered endpoints outside WHOOP's stable v2 API — too brittle and ToS-risky. See [`jd1207/whoop-mcp`](https://github.com/jd1207/whoop-mcp) if you need that. |
+| Multi-user / shared server | One user, one WHOOP account, one machine. The cache + encrypted tokens live under `~/.whoop-mcp-server/`; there's no tenancy model. |
+| More than 10 users per WHOOP dev app | WHOOP's dev-app cap is 10 users until app-level approval. Each user should create their own dev app — it's free and self-serve. |
+| Push notifications / webhooks | Event feed is poll-driven from the cache. For proactive alerts, run `sync_whoop` + `get_whoop_events` on a cron from whatever scheduler you already have. |
+| Python < 3.10 | The code uses `X \| Y` union syntax. `pip install` will refuse on older Pythons. |
+| Windows-specific install paths | Code works, but OAuth callback (`localhost:8000`) and path handling haven't been dogfooded on Windows. Ubuntu + macOS are the currently-tested surface. |
+
+## Updating
+
+MCP servers don't auto-update. When you installed is when you pinned.
+How to pick up a new release depends on how you installed:
+
+| Install path | How to update |
+|---|---|
+| `uvx --from whoop-mcp whoop-mcp` | `uvx --refresh --from whoop-mcp whoop-mcp`, or `uv cache clean whoop-mcp` and re-invoke |
+| `uvx --from whoop-mcp@latest whoop-mcp` | Update happens on next cache miss (no manual step) |
+| `pipx install whoop-mcp` | `pipx upgrade whoop-mcp` |
+| `pip install whoop-mcp` | `pip install --upgrade whoop-mcp` |
+| Git clone + venv | `git pull && pip install -r requirements.txt` |
+
+Run `health_check()` afterwards — its `pypi_update_available` component
+will confirm the version your MCP client is now running and whether a
+newer one is published.
+
+Breaking-change policy: while the project is `0.x`, minor bumps
+(`0.8.x` → `0.9.0`) may include breaking changes — always called out in
+the `### Changed` section of [CHANGELOG.md](./CHANGELOG.md). Patch
+bumps (`0.8.2` → `0.8.2`) are bugfix-only. Once we cut `1.0.0`,
+breaking changes require a major bump. Pin to a known-good `0.x.y` if
+you can't absorb churn.
+
 ## Operations
 
 - **Logs.** Stderr (always, structured JSON) plus a rotating file at
@@ -431,7 +472,7 @@ call is respx-mocked so you can iterate offline.
 
 ## Versioning
 
-Current version: **0.8.1** (see `src/__version__.py`). Semantic
+Current version: **0.8.2** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits

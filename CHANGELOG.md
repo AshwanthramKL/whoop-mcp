@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-04-22
+### Added
+- **`pypi_update_available` component in `health_check`.** MCP servers never auto-update — users who installed last month are running last month's code until they explicitly refresh. The check queries `https://pypi.org/pypi/whoop-mcp/json` with a 3s timeout, compares the installed `SERVER_VERSION` against the latest release, and reports `ok` (up-to-date), `warn` (newer available — includes both versions in the output), or `skipped` (when `live=False` or `WHOOP_UPDATE_CHECK=false`). Five new tests cover up-to-date, newer-available, disabled-by-env, live=False, and pypi-unreachable paths.
+- **README "What's not supported" section.** Spells out what we don't and won't do (claude.ai web, mobile, write-back, multi-user, >10 users per dev app, webhooks, Python <3.10, Windows-specific paths). Preempts ~80% of bad issues.
+- **README "Updating" section.** Documents how to pull a new release for each install path (uvx `--refresh`, pipx upgrade, pip --upgrade, git pull). Breaking-change policy stated explicitly.
+- **Community files.** `.github/ISSUE_TEMPLATE/bug_report.md`, `feature_request.md`, `question.md`, `config.yml` (disables blank issues, routes WHOOP-API and MCP-protocol questions upstream). `.github/PULL_REQUEST_TEMPLATE.md` with a pre-merge checklist. `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1 verbatim, with contact email filled in).
+- **`.github/dependabot.yml`.** Weekly PRs for pip dependencies (grouped by dev vs runtime patches to avoid PR spam) and monthly PRs for GitHub Actions.
+
+### Changed
+- `health_check` docstring updated to document the new `pypi_update_available` component and the `WHOOP_UPDATE_CHECK` env var opt-out.
+
 ## [0.8.1] - 2026-04-22
 ### Added
 - **ruff** (replaces black + isort + flake8). Config in `pyproject.toml` under `[tool.ruff]` — lean rule set (E/W/F/I/UP/B/SIM/RUF), 100-char lines, no docstring policing. Ran across the full codebase: 514 initial findings → 0.

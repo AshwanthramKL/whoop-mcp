@@ -1,0 +1,35 @@
+# Weekly dependency update PRs. Dependabot opens one PR per out-of-date
+# dependency; group trivial updates to avoid PR spam.
+
+version: 2
+updates:
+  # Python runtime + dev deps.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      # Grouping so a dozen patch bumps don't flood the PR list.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      runtime-patch:
+        dependency-type: production
+        update-types:
+          - patch
+
+  # GitHub Actions used in workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
