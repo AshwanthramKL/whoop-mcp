@@ -1102,6 +1102,44 @@ async def get_whoop_events(
     )
 
 
+# ---------- Events feed resources (M5) ----------
+
+# FastMCP 1.27 path-template params are required, so we expose two
+# resources — one that defaults ``until`` to "now" and one that takes
+# both bounds explicitly. Path segments are ISO-8601 timestamps (Z form
+# recommended).
+
+
+@mcp.resource(
+    "whoop://db/events/{since}",
+    mime_type="application/json",
+    description=(
+        "Cached events with updated_at in (since, now). 'since' is an "
+        "ISO-8601 timestamp. Returns the same shape as get_whoop_events."
+    ),
+)
+def resource_events_since(since: str) -> str:
+    payload = _events_core(
+        since=since, until=None, resources=None, limit=500
+    )
+    return json.dumps(payload, default=str)
+
+
+@mcp.resource(
+    "whoop://db/events/{since}/{until}",
+    mime_type="application/json",
+    description=(
+        "Cached events with updated_at in (since, until). Both bounds are "
+        "ISO-8601 timestamps. Returns the same shape as get_whoop_events."
+    ),
+)
+def resource_events_window(since: str, until: str) -> str:
+    payload = _events_core(
+        since=since, until=until, resources=None, limit=500
+    )
+    return json.dumps(payload, default=str)
+
+
 # ---------- Export tool (M4) ----------
 
 
