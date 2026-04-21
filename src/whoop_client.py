@@ -1,178 +1,348 @@
 """
-WHOOP API Client for MCP Server
+WHOOP v2 API client — M1 surface.
+
+Pure data layer. No caching, no joins, no derived metrics.
+
+Design notes:
+- One shared ``httpx.AsyncClient`` per ``WhoopClient`` instance.
+- Retry policy:
+    * 429 -> sleep Retry-After (or 1s), retry once, then raise RateLimitError.
+    * 5xx -> exponential backoff 1, 2, 4s, max 3 retries, then raise UpstreamError.
+    * 4xx (not 429) -> no retry; 401 -> AuthError, 404 -> NotFoundError, else UpstreamError.
+- Auto-pagination: list_* methods accept an optional ``limit`` meaning total
+  records desired. Internally we request in batches of 25 and follow
+  ``next_token`` until either limit reached or token is null.
+- Logging: structured JSON lines to stderr via the module logger; never log
+  the bearer token or any secret.
 """
-import httpx
+from __future__ import annotations
+
+import asyncio
 import json
 import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
-from config import (
-    WHOOP_API_BASE,
-    REQUEST_TIMEOUT,
-    MAX_REQUESTS_PER_MINUTE,
-    CACHE_STORAGE_PATH,
-    CACHE_DURATION
-)
+import httpx
+
 from auth_manager import TokenManager
+from config import REQUEST_TIMEOUT, WHOOP_API_BASE
+
+__all__ = [
+    "WhoopClient",
+    "WhoopAPIError",
+    "AuthError",
+    "RateLimitError",
+    "NotFoundError",
+    "UpstreamError",
+    "ValidationError",
+]
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+
+
+# ---------- Exceptions ----------
+
+
+class WhoopAPIError(Exception):
+    """Base class for all WhoopClient errors.
+
+    Attributes:
+        code: machine-readable error code (e.g. "AUTH_FAILED").
+        status: HTTP status code (0 when the error never left the process).
+        message: human-readable description.
+        endpoint: request path that triggered the error.
+    """
+
+    def __init__(self, code: str, status: int, message: str, endpoint: str) -> None:
+        super().__init__(f"{code} [{status}] {endpoint}: {message}")
+        self.code = code
+        self.status = status
+        self.message = message
+        self.endpoint = endpoint
+
+
+class AuthError(WhoopAPIError):
+    pass
+
+
+class RateLimitError(WhoopAPIError):
+    pass
+
+
+class NotFoundError(WhoopAPIError):
+    pass
+
+
+class UpstreamError(WhoopAPIError):
+    pass
+
+
+class ValidationError(WhoopAPIError):
+    pass
+
+
+# ---------- Constants ----------
+
+MAX_PAGE_SIZE = 25
+MAX_5XX_RETRIES = 3
+BACKOFF_SCHEDULE_S = (1, 2, 4)
+
+
+def _log(event: str, **fields: Any) -> None:
+    """Emit a structured log line to stderr."""
+    payload = {"event": event, **fields}
+    try:
+        logger.info(json.dumps(payload, default=str))
+    except Exception:
+        # Never let logging break the request path.
+        pass
+
+
+def _coerce_datetime(value: Union[str, datetime, None], field: str, endpoint: str) -> Optional[str]:
+    """Accept ISO-8601 string or datetime, return an ISO-8601 string."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if not isinstance(value, str):
+        raise ValidationError(
+            "VALIDATION_ERROR", 0, f"{field} must be str or datetime", endpoint
+        )
+    # Validate it actually parses. Accept trailing Z by swapping to +00:00.
+    parseable = value.replace("Z", "+00:00")
+    try:
+        datetime.fromisoformat(parseable)
+    except ValueError as e:
+        raise ValidationError(
+            "VALIDATION_ERROR",
+            0,
+            f"{field} is not a valid ISO-8601 datetime: {e}",
+            endpoint,
+        ) from e
+    return value
+
+
+# ---------- Client ----------
+
 
 class WhoopClient:
-    """WHOOP API client with caching and rate limiting"""
-    
-    def __init__(self):
-        self.base_url = WHOOP_API_BASE
+    """Async WHOOP v2 data client."""
+
+    def __init__(self, http_client: Optional[httpx.AsyncClient] = None) -> None:
+        self.base_url = WHOOP_API_BASE.rstrip("/")
         self.token_manager = TokenManager()
-        self.cache = {}
-        self.request_count = 0
-        self.request_window_start = datetime.now()
-        
-    def _get_headers(self) -> Dict[str, str]:
-        """Get headers with valid access token"""
-        access_token = self.token_manager.get_valid_access_token()
-        if not access_token:
-            raise Exception("No valid access token available")
-        
-        return {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-    
-    def _check_rate_limit(self) -> None:
-        """Check if we're within rate limits"""
-        now = datetime.now()
-        
-        # Reset counter if window has passed
-        if (now - self.request_window_start).total_seconds() >= 60:
-            self.request_count = 0
-            self.request_window_start = now
-        
-        if self.request_count >= MAX_REQUESTS_PER_MINUTE:
-            raise Exception("Rate limit exceeded. Please wait before making more requests.")
-        
-        self.request_count += 1
-    
-    def _get_cache_key(self, endpoint: str, params: Dict[str, Any] = None) -> str:
-        """Generate cache key for endpoint and parameters"""
-        if params:
-            param_str = json.dumps(params, sort_keys=True)
-            return f"{endpoint}:{param_str}"
-        return endpoint
-    
-    def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """Get data from cache if still valid"""
-        if cache_key in self.cache:
-            cached_data = self.cache[cache_key]
-            cache_time = datetime.fromisoformat(cached_data['cached_at'])
-            
-            if (datetime.now() - cache_time).total_seconds() < CACHE_DURATION:
-                logger.debug(f"Cache hit for {cache_key}")
-                return cached_data['data']
-            else:
-                # Remove expired cache entry
-                del self.cache[cache_key]
-        
-        return None
-    
-    def _save_to_cache(self, cache_key: str, data: Dict[str, Any]) -> None:
-        """Save data to cache"""
-        self.cache[cache_key] = {
-            'data': data,
-            'cached_at': datetime.now().isoformat()
-        }
-        logger.debug(f"Cached data for {cache_key}")
-    
-    async def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Make authenticated request to WHOOP API"""
-        # Check rate limits
-        self._check_rate_limit()
-        
-        # Check cache first
-        cache_key = self._get_cache_key(endpoint, params)
-        cached_data = self._get_from_cache(cache_key)
-        if cached_data:
-            return cached_data
-        
-        # Make API request
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        headers = self._get_headers()
-        
-        try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-                response = await client.get(url, headers=headers, params=params or {})
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    # Cache successful responses
-                    self._save_to_cache(cache_key, data)
-                    return data
-                elif response.status_code == 401:
-                    # Token might be expired, clear cache and try once more
-                    self.token_manager.clear_tokens()
-                    raise Exception("Authentication failed. Please re-authorize your WHOOP account.")
-                else:
-                    raise Exception(f"API request failed with status {response.status_code}: {response.text}")
-                    
-        except httpx.TimeoutException:
-            raise Exception("Request timed out. Please try again.")
-        except Exception as e:
-            logger.error(f"Request failed for {endpoint}: {e}")
-            raise
-    
-    async def get_user_profile(self) -> Dict[str, Any]:
-        """Get user profile information"""
-        return await self._make_request("/user/profile/basic")
-    
-    async def get_workouts(self, start_date: str = None, end_date: str = None, limit: int = 25) -> Dict[str, Any]:
-        """Get user workouts"""
-        params = {'limit': limit}
-        
-        if start_date:
-            params['start'] = start_date
-        if end_date:
-            params['end'] = end_date
-            
-        return await self._make_request("/activity/workout", params)
-    
-    async def get_recovery(self, start_date: str = None, end_date: str = None, limit: int = 25) -> Dict[str, Any]:
-        """Get user recovery data"""
-        params = {'limit': limit}
-        
-        if start_date:
-            params['start'] = start_date
-        if end_date:
-            params['end'] = end_date
-            
-        return await self._make_request("/recovery", params)
-    
-    async def get_sleep(self, start_date: str = None, end_date: str = None, limit: int = 25) -> Dict[str, Any]:
-        """Get user sleep data"""
-        params = {'limit': limit}
-        
-        if start_date:
-            params['start'] = start_date
-        if end_date:
-            params['end'] = end_date
-            
-        return await self._make_request("/activity/sleep", params)
-    
-    async def get_cycles(self, start_date: str = None, end_date: str = None, limit: int = 25) -> Dict[str, Any]:
-        """Get user physiological cycles"""
-        params = {'limit': limit}
-        
-        if start_date:
-            params['start'] = start_date
-        if end_date:
-            params['end'] = end_date
-            
-        return await self._make_request("/cycle", params)
-    
+        self._owns_client = http_client is None
+        self._client = http_client or httpx.AsyncClient(
+            timeout=REQUEST_TIMEOUT,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+        )
+
+    # ----- public single-resource endpoints -----
+
+    async def get_profile(self) -> Dict[str, Any]:
+        return await self._request("GET", "/user/profile/basic")
+
+    async def get_body_measurement(self) -> Dict[str, Any]:
+        return await self._request("GET", "/user/measurement/body")
+
+    async def get_cycle(self, cycle_id: Union[int, str]) -> Dict[str, Any]:
+        return await self._request("GET", f"/cycle/{cycle_id}")
+
+    async def get_cycle_sleep(self, cycle_id: Union[int, str]) -> Dict[str, Any]:
+        return await self._request("GET", f"/cycle/{cycle_id}/sleep")
+
+    async def get_cycle_recovery(self, cycle_id: Union[int, str]) -> Dict[str, Any]:
+        return await self._request("GET", f"/cycle/{cycle_id}/recovery")
+
+    async def get_sleep(self, sleep_id: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/activity/sleep/{sleep_id}")
+
+    async def get_workout(self, workout_id: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/activity/workout/{workout_id}")
+
+    # ----- public list (paginated) endpoints -----
+
+    async def list_cycles(
+        self,
+        start: Union[str, datetime, None] = None,
+        end: Union[str, datetime, None] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._paginate("/cycle", start=start, end=end, limit=limit)
+
+    async def list_recoveries(
+        self,
+        start: Union[str, datetime, None] = None,
+        end: Union[str, datetime, None] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._paginate("/recovery", start=start, end=end, limit=limit)
+
+    async def list_sleeps(
+        self,
+        start: Union[str, datetime, None] = None,
+        end: Union[str, datetime, None] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._paginate("/activity/sleep", start=start, end=end, limit=limit)
+
+    async def list_workouts(
+        self,
+        start: Union[str, datetime, None] = None,
+        end: Union[str, datetime, None] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        return await self._paginate("/activity/workout", start=start, end=end, limit=limit)
+
+    # ----- auth status passthrough (used by MCP auth tool) -----
+
     def get_auth_status(self) -> Dict[str, Any]:
-        """Get authentication status"""
         return self.token_manager.get_token_info()
-    
-    def clear_cache(self) -> None:
-        """Clear all cached data"""
-        self.cache.clear()
-        logger.info("Cache cleared")
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    # ----- internal: pagination -----
+
+    async def _paginate(
+        self,
+        path: str,
+        *,
+        start: Union[str, datetime, None],
+        end: Union[str, datetime, None],
+        limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        start_iso = _coerce_datetime(start, "start", path)
+        end_iso = _coerce_datetime(end, "end", path)
+        if limit is not None and limit <= 0:
+            raise ValidationError("VALIDATION_ERROR", 0, "limit must be > 0", path)
+
+        records: List[Dict[str, Any]] = []
+        next_token: Optional[str] = None
+        while True:
+            params: Dict[str, Any] = {"limit": MAX_PAGE_SIZE}
+            if start_iso is not None:
+                params["start"] = start_iso
+            if end_iso is not None:
+                params["end"] = end_iso
+            if next_token:
+                params["nextToken"] = next_token
+
+            page = await self._request("GET", path, params=params)
+            batch = page.get("records") or []
+            records.extend(batch)
+
+            next_token = page.get("next_token")
+            if limit is not None and len(records) >= limit:
+                return records[:limit]
+            if not next_token:
+                return records
+
+    # ----- internal: HTTP with retries -----
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        headers = self._auth_headers(path)
+
+        attempt_5xx = 0
+        attempt_429 = 0
+        while True:
+            try:
+                response = await self._client.request(
+                    method, url, headers=headers, params=params
+                )
+            except httpx.TimeoutException as e:
+                raise UpstreamError("UPSTREAM_ERROR", 0, f"timeout: {e}", path) from e
+            except httpx.TransportError as e:
+                raise UpstreamError("UPSTREAM_ERROR", 0, f"transport: {e}", path) from e
+
+            status = response.status_code
+
+            if 200 <= status < 300:
+                try:
+                    return response.json()
+                except ValueError as e:
+                    raise UpstreamError(
+                        "UPSTREAM_ERROR", status, f"invalid JSON: {e}", path
+                    ) from e
+
+            if status == 401:
+                raise AuthError("AUTH_FAILED", 401, "authentication failed", path)
+            if status == 404:
+                raise NotFoundError("NOT_FOUND", 404, "resource not found", path)
+
+            if status == 429:
+                if attempt_429 >= 1:
+                    raise RateLimitError(
+                        "RATE_LIMITED", 429, "rate limited after retry", path
+                    )
+                retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+                attempt_429 += 1
+                _log(
+                    "retry",
+                    endpoint=path,
+                    status=429,
+                    attempt=attempt_429,
+                    delay_s=retry_after,
+                )
+                await asyncio.sleep(retry_after)
+                continue
+
+            if 500 <= status < 600:
+                if attempt_5xx >= MAX_5XX_RETRIES:
+                    raise UpstreamError(
+                        "UPSTREAM_ERROR",
+                        status,
+                        f"exhausted retries ({MAX_5XX_RETRIES})",
+                        path,
+                    )
+                delay = BACKOFF_SCHEDULE_S[min(attempt_5xx, len(BACKOFF_SCHEDULE_S) - 1)]
+                attempt_5xx += 1
+                _log(
+                    "retry",
+                    endpoint=path,
+                    status=status,
+                    attempt=attempt_5xx,
+                    delay_s=delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            # Any other 4xx is a client-side error; no retry.
+            raise UpstreamError(
+                "UPSTREAM_ERROR", status, f"unexpected status {status}", path
+            )
+
+    def _auth_headers(self, path: str) -> Dict[str, str]:
+        token = self.token_manager.get_valid_access_token()
+        if not token:
+            raise AuthError("AUTH_FAILED", 0, "no valid access token", path)
+        return {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": "WHOOP-MCP-Server/0.2.0",
+        }
+
+
+def _parse_retry_after(header_value: Optional[str]) -> float:
+    """Parse a Retry-After header (seconds). Falls back to 1s."""
+    if not header_value:
+        return 1.0
+    try:
+        return float(header_value)
+    except (TypeError, ValueError):
+        return 1.0
