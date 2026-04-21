@@ -11,12 +11,10 @@ raise, errors come back as structured envelopes, retries respect the
 documented schedule, and snapshots of the cache stay consistent under
 adverse conditions.
 """
+
 from __future__ import annotations
 
-import json
 import sqlite3
-from pathlib import Path
-from typing import Any, Dict, List
 
 import httpx
 import pytest
@@ -24,9 +22,6 @@ import respx
 
 import whoop_mcp_server as server
 from whoop_client import (
-    AuthError,
-    RateLimitError,
-    UpstreamError,
     WhoopClient,
 )
 from whoop_store import WhoopStore
@@ -40,7 +35,7 @@ V2 = "https://api.prod.whoop.com/developer/v2"
 @pytest.fixture
 def no_sleep(monkeypatch):
     """Monkeypatch asyncio.sleep inside whoop_client to capture delays."""
-    delays: List[float] = []
+    delays: list[float] = []
 
     async def _fake(s):
         delays.append(s)
@@ -103,9 +98,7 @@ async def test_429_repeating_raises_rate_limited(no_sleep, monkeypatch):
 @pytest.mark.asyncio
 @respx.mock
 async def test_three_500s_raise_upstream_error(no_sleep, monkeypatch):
-    respx.get(f"{V2}/user/profile/basic").mock(
-        return_value=httpx.Response(500, text="bad")
-    )
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(500, text="bad"))
     monkeypatch.setattr(server, "_whoop_client", None)
     r = await server.get_whoop_profile(fresh=True)
     assert "error" in r
@@ -163,9 +156,7 @@ async def test_503_with_retry_after_respects_header(no_sleep, fixture_loader):
 @pytest.mark.asyncio
 @respx.mock
 async def test_connection_error_maps_to_upstream(no_sleep, monkeypatch):
-    respx.get(f"{V2}/user/profile/basic").mock(
-        side_effect=httpx.ConnectError("connection refused")
-    )
+    respx.get(f"{V2}/user/profile/basic").mock(side_effect=httpx.ConnectError("connection refused"))
     monkeypatch.setattr(server, "_whoop_client", None)
     r = await server.get_whoop_profile(fresh=True)
     assert "error" in r
@@ -175,9 +166,7 @@ async def test_connection_error_maps_to_upstream(no_sleep, monkeypatch):
 @pytest.mark.asyncio
 @respx.mock
 async def test_read_timeout_maps_to_upstream(no_sleep, monkeypatch):
-    respx.get(f"{V2}/user/profile/basic").mock(
-        side_effect=httpx.ReadTimeout("timed out")
-    )
+    respx.get(f"{V2}/user/profile/basic").mock(side_effect=httpx.ReadTimeout("timed out"))
     monkeypatch.setattr(server, "_whoop_client", None)
     r = await server.get_whoop_profile(fresh=True)
     assert "error" in r
@@ -192,6 +181,7 @@ async def test_cache_readable_fails_when_store_cannot_init(tmp_path, monkeypatch
     """If the store can't be brought up, cache_readable reports fail and
     the overall status is unhealthy.
     """
+
     # Force the store getter to blow up so the readable check reports fail.
     def _boom():
         raise RuntimeError("store on fire")
@@ -212,9 +202,9 @@ def test_upsert_under_db_lock_raises_or_reports_cache_error(tmp_path):
     store = WhoopStore(str(db))
     try:
         # init_schema should fail (can't create tables while another
-        # conn has EXCLUSIVE). We accept any exception — the important
-        # thing is we don't crash the whole process silently.
-        with pytest.raises(Exception):
+        # conn has EXCLUSIVE). Narrow to sqlite3 errors — anything else
+        # would be a genuine surprise worth seeing in the test output.
+        with pytest.raises(sqlite3.OperationalError):
             store.init_schema()
     finally:
         holder.rollback()
@@ -230,14 +220,14 @@ def test_iter_events_skips_corrupt_flat_json(tmp_path, caplog):
     # Manually poison a row with invalid JSON in flat_json via low-level write.
     conn = store._connect()
     conn.execute(
-        "INSERT INTO cycles (id, start, \"end\", updated_at, score_state, "
+        'INSERT INTO cycles (id, start, "end", updated_at, score_state, '
         "cycle_id, raw_json, flat_json) VALUES "
         "('poison', '2026-04-18T00:00:00Z', '2026-04-19T00:00:00Z', "
         "'2026-04-20T12:00:00Z', 'SCORED', NULL, '{}', 'NOT_JSON!!!')"
     )
     # Plus a good row.
     conn.execute(
-        "INSERT INTO cycles (id, start, \"end\", updated_at, score_state, "
+        'INSERT INTO cycles (id, start, "end", updated_at, score_state, '
         "cycle_id, raw_json, flat_json) VALUES "
         "('good', '2026-04-18T00:00:00Z', '2026-04-19T00:00:00Z', "
         "'2026-04-20T13:00:00Z', 'SCORED', NULL, '{}', '{\"id\":\"good\"}')"

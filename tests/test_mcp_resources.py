@@ -5,6 +5,7 @@ We don't spin up an MCP transport; instead we go through FastMCP's
 resource manager (``get_resource``) which is exactly how a real MCP
 client lookup flows internally.
 """
+
 from __future__ import annotations
 
 import json

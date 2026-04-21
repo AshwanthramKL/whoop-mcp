@@ -20,16 +20,15 @@ Envelope codes emitted by this module:
 Security note: exports are flat copies of your fitness data. Write them
 to a secure location; the writer does not apply special file modes.
 """
+
 from __future__ import annotations
 
 import csv
-import io
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("whoop_export")
 
@@ -51,7 +50,7 @@ ALL_RESOURCES = (
 _EXT = {"csv": ".csv", "jsonl": ".jsonl", "parquet": ".parquet"}
 
 
-def _error(code: str, message: str) -> Dict[str, Any]:
+def _error(code: str, message: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "endpoint": "export_whoop"}}
 
 
@@ -64,16 +63,14 @@ def _parse_iso_date(s: str) -> datetime:
     return d.replace(tzinfo=timezone.utc)
 
 
-def _window_bounds(
-    start: Optional[str], end: Optional[str]
-) -> Tuple[Optional[str], Optional[str]]:
+def _window_bounds(start: str | None, end: str | None) -> tuple[str | None, str | None]:
     """Translate YYYY-MM-DD start/end to ISO8601 Z bounds.
 
     ``start`` becomes ``YYYY-MM-DDT00:00:00.000Z`` (inclusive lower).
     ``end`` becomes ``YYYY-MM-DDT23:59:59.999Z`` (inclusive upper).
     """
-    s: Optional[str] = None
-    e: Optional[str] = None
+    s: str | None = None
+    e: str | None = None
     if start is not None:
         _parse_iso_date(start)
         s = f"{start}T00:00:00.000Z"
@@ -117,7 +114,7 @@ def _encode_cell(value: Any) -> Any:
     return value
 
 
-def _write_csv(path: Path, records: List[Dict[str, Any]]) -> int:
+def _write_csv(path: Path, records: list[dict[str, Any]]) -> int:
     """Write a CSV file. Returns the number of records written.
 
     Header is the union of keys across all records, sorted alphabetically
@@ -125,7 +122,7 @@ def _write_csv(path: Path, records: List[Dict[str, Any]]) -> int:
     file is a valid RFC 4180 CSV — except when we also have no keys at
     all, in which case we write an empty file.
     """
-    keys: List[str] = sorted({k for r in records for k in r.keys()})
+    keys: list[str] = sorted({k for r in records for k in r})
     # Use newline="" per csv docs on Windows/RFC 4180 quoting
     with open(path, "w", encoding="utf-8", newline="") as f:
         if keys:
@@ -139,7 +136,7 @@ def _write_csv(path: Path, records: List[Dict[str, Any]]) -> int:
 # ---------- JSONL writer ----------
 
 
-def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> int:
+def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> int:
     """Write a JSONL file. Each line is a JSON object with sorted keys.
 
     Empty record list results in a zero-byte file (no lines, no header).
@@ -154,7 +151,7 @@ def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> int:
 # ---------- Parquet writer ----------
 
 
-def _write_parquet(path: Path, records: List[Dict[str, Any]]) -> int:
+def _write_parquet(path: Path, records: list[dict[str, Any]]) -> int:
     """Write a Parquet file via pyarrow.
 
     Schema is inferred from the record list. Sparse keys become nullable
@@ -180,8 +177,10 @@ def _write_parquet(path: Path, records: List[Dict[str, Any]]) -> int:
         table = pa.Table.from_pylist(records)
     except (pa.ArrowInvalid, pa.ArrowTypeError, TypeError):
         normalized = [
-            {k: (json.dumps(v, default=str) if isinstance(v, (dict, list)) else v)
-             for k, v in r.items()}
+            {
+                k: (json.dumps(v, default=str) if isinstance(v, (dict, list)) else v)
+                for k, v in r.items()
+            }
             for r in records
         ]
         table = pa.Table.from_pylist(normalized)
@@ -190,11 +189,12 @@ def _write_parquet(path: Path, records: List[Dict[str, Any]]) -> int:
     return len(records)
 
 
-def _dispatch_writer(fmt: str, path: Path, records: List[Dict[str, Any]]) -> int:
+def _dispatch_writer(fmt: str, path: Path, records: list[dict[str, Any]]) -> int:
     """Dispatch to a writer by format name, resolving the module attribute
     at call time so tests can monkeypatch ``whoop_export._write_csv`` etc.
     """
     import sys as _sys
+
     mod = _sys.modules[__name__]
     fn = getattr(mod, f"_write_{fmt}")
     return fn(path, records)
@@ -204,8 +204,8 @@ def _dispatch_writer(fmt: str, path: Path, records: List[Dict[str, Any]]) -> int
 
 
 def _read_resource(
-    store: Any, resource: str, start_iso: Optional[str], end_iso: Optional[str]
-) -> List[Dict[str, Any]]:
+    store: Any, resource: str, start_iso: str | None, end_iso: str | None
+) -> list[dict[str, Any]]:
     return list(store.iter_records(resource, start=start_iso, end=end_iso))
 
 
@@ -213,9 +213,9 @@ def _write_one(
     fmt: str,
     resource: str,
     path: Path,
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     overwrite: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not overwrite and _path_has_content(path):
         return _error(
             "FILE_EXISTS",
@@ -241,10 +241,10 @@ def export_whoop(
     kind: str,
     format: str,
     path: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    start: str | None = None,
+    end: str | None = None,
     overwrite: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Export cached WHOOP records to disk.
 
     This is the impl called by the MCP tool wrapper. It never raises;
@@ -290,7 +290,7 @@ def export_whoop(
         # the resource itself has zero rows in the cache (regardless of
         # window). A valid date window with no overlap is not an error —
         # we still write an empty file. -----
-        per_resource: List[Tuple[str, List[Dict[str, Any]]]] = []
+        per_resource: list[tuple[str, list[dict[str, Any]]]] = []
         total_in_window = 0
         total_in_cache = 0
         for res in resources:
@@ -311,7 +311,7 @@ def export_whoop(
             )
 
         # ----- write files -----
-        files: List[Dict[str, Any]] = []
+        files: list[dict[str, Any]] = []
         if kind == "all":
             for res, recs in per_resource:
                 fname = f"{res}{_EXT[format]}"

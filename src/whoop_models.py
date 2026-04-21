@@ -20,16 +20,17 @@ Quick rules summary:
 - ``score_state`` always lifted to top level. If not SCORED, score fields
   are ``None``.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
-    "Profile",
     "BodyMeasurement",
     "Cycle",
+    "Profile",
     "Recovery",
     "Sleep",
     "Workout",
@@ -39,22 +40,26 @@ __all__ = [
 KJ_TO_KCAL = 0.239006
 
 
-def _ms_to_s(value: Optional[int]) -> Optional[float]:
+def _ms_to_s(value: int | None) -> float | None:
     """Convert milliseconds to seconds (1 decimal). Returns None for None."""
     if value is None:
         return None
     return round(value / 1000.0, 1)
 
 
-def _kj_to_cal(kj: Optional[float]) -> Optional[int]:
+def _kj_to_cal(kj: float | None) -> int | None:
     """Convert kilojoules to kcal, rounded to an integer."""
     if kj is None:
         return None
-    return int(round(kj * KJ_TO_KCAL))
+    return round(kj * KJ_TO_KCAL)
 
 
 class _Base(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    def flatten(self) -> dict[str, Any]:  # pragma: no cover - overridden by subclasses
+        """Return the LLM-friendly flat shape. Each concrete subclass implements this."""
+        raise NotImplementedError
 
 
 # ---------- Profile ----------
@@ -63,11 +68,11 @@ class _Base(BaseModel):
 class Profile(_Base):
     """WHOOP user profile (identity only)."""
 
-    email: Optional[str] = Field(default=None, description="User's email address.")
-    first_name: Optional[str] = Field(default=None, description="User's first name.")
-    last_name: Optional[str] = Field(default=None, description="User's last name.")
+    email: str | None = Field(default=None, description="User's email address.")
+    first_name: str | None = Field(default=None, description="User's first name.")
+    last_name: str | None = Field(default=None, description="User's last name.")
 
-    def flatten(self) -> Dict[str, Any]:
+    def flatten(self) -> dict[str, Any]:
         return {
             "email": self.email,
             "first_name": self.first_name,
@@ -81,13 +86,11 @@ class Profile(_Base):
 class BodyMeasurement(_Base):
     """Latest body measurements."""
 
-    height_meter: Optional[float] = Field(default=None, description="Height in meters.")
-    weight_kilogram: Optional[float] = Field(default=None, description="Weight in kg.")
-    max_heart_rate: Optional[int] = Field(
-        default=None, description="Measured max heart rate in bpm."
-    )
+    height_meter: float | None = Field(default=None, description="Height in meters.")
+    weight_kilogram: float | None = Field(default=None, description="Weight in kg.")
+    max_heart_rate: int | None = Field(default=None, description="Measured max heart rate in bpm.")
 
-    def flatten(self) -> Dict[str, Any]:
+    def flatten(self) -> dict[str, Any]:
         return {
             "height_meter": self.height_meter,
             "weight_kilogram": self.weight_kilogram,
@@ -99,29 +102,27 @@ class BodyMeasurement(_Base):
 
 
 class _CycleScore(_Base):
-    strain: Optional[float] = None
-    kilojoule: Optional[float] = None
-    average_heart_rate: Optional[int] = None
-    max_heart_rate: Optional[int] = None
+    strain: float | None = None
+    kilojoule: float | None = None
+    average_heart_rate: int | None = None
+    max_heart_rate: int | None = None
 
 
 class Cycle(_Base):
     """One WHOOP physiological cycle (roughly a 'day' per WHOOP's definition)."""
 
     id: int = Field(description="WHOOP cycle ID.")
-    start: Optional[str] = Field(default=None, description="ISO-8601 cycle start.")
-    end: Optional[str] = Field(
+    start: str | None = Field(default=None, description="ISO-8601 cycle start.")
+    end: str | None = Field(
         default=None, description="ISO-8601 cycle end (null for the ongoing cycle)."
     )
-    timezone_offset: Optional[str] = Field(
-        default=None, description="Timezone offset like '+05:30'."
-    )
-    score_state: Optional[str] = Field(
+    timezone_offset: str | None = Field(default=None, description="Timezone offset like '+05:30'.")
+    score_state: str | None = Field(
         default=None, description="SCORED / PENDING_SCORE / UNSCORABLE."
     )
-    score: Optional[_CycleScore] = None
+    score: _CycleScore | None = None
 
-    def flatten(self) -> Dict[str, Any]:
+    def flatten(self) -> dict[str, Any]:
         score = self.score
         return {
             "id": self.id,
@@ -140,23 +141,23 @@ class Cycle(_Base):
 
 
 class _RecoveryScore(_Base):
-    recovery_score: Optional[float] = None
-    resting_heart_rate: Optional[float] = None
-    hrv_rmssd_milli: Optional[float] = None
-    spo2_percentage: Optional[float] = None
-    skin_temp_celsius: Optional[float] = None
-    user_calibrating: Optional[bool] = None
+    recovery_score: float | None = None
+    resting_heart_rate: float | None = None
+    hrv_rmssd_milli: float | None = None
+    spo2_percentage: float | None = None
+    skin_temp_celsius: float | None = None
+    user_calibrating: bool | None = None
 
 
 class Recovery(_Base):
     """Morning recovery record attached to a cycle + sleep."""
 
-    cycle_id: Optional[int] = Field(default=None, description="Parent cycle ID.")
-    sleep_id: Optional[str] = Field(default=None, description="Source sleep UUID.")
-    score_state: Optional[str] = Field(default=None, description="Score state.")
-    score: Optional[_RecoveryScore] = None
+    cycle_id: int | None = Field(default=None, description="Parent cycle ID.")
+    sleep_id: str | None = Field(default=None, description="Source sleep UUID.")
+    score_state: str | None = Field(default=None, description="Score state.")
+    score: _RecoveryScore | None = None
 
-    def flatten(self) -> Dict[str, Any]:
+    def flatten(self) -> dict[str, Any]:
         s = self.score
         return {
             "cycle_id": self.cycle_id,
@@ -175,45 +176,45 @@ class Recovery(_Base):
 
 
 class _SleepStageSummary(_Base):
-    disturbance_count: Optional[int] = None
-    sleep_cycle_count: Optional[int] = None
-    total_awake_time_milli: Optional[int] = None
-    total_in_bed_time_milli: Optional[int] = None
-    total_light_sleep_time_milli: Optional[int] = None
-    total_no_data_time_milli: Optional[int] = None
-    total_rem_sleep_time_milli: Optional[int] = None
-    total_slow_wave_sleep_time_milli: Optional[int] = None
+    disturbance_count: int | None = None
+    sleep_cycle_count: int | None = None
+    total_awake_time_milli: int | None = None
+    total_in_bed_time_milli: int | None = None
+    total_light_sleep_time_milli: int | None = None
+    total_no_data_time_milli: int | None = None
+    total_rem_sleep_time_milli: int | None = None
+    total_slow_wave_sleep_time_milli: int | None = None
 
 
 class _SleepNeeded(_Base):
-    baseline_milli: Optional[int] = None
-    need_from_recent_nap_milli: Optional[int] = None
-    need_from_recent_strain_milli: Optional[int] = None
-    need_from_sleep_debt_milli: Optional[int] = None
+    baseline_milli: int | None = None
+    need_from_recent_nap_milli: int | None = None
+    need_from_recent_strain_milli: int | None = None
+    need_from_sleep_debt_milli: int | None = None
 
 
 class _SleepScore(_Base):
-    respiratory_rate: Optional[float] = None
-    sleep_consistency_percentage: Optional[float] = None
-    sleep_efficiency_percentage: Optional[float] = None
-    sleep_performance_percentage: Optional[float] = None
-    sleep_needed: Optional[_SleepNeeded] = None
-    stage_summary: Optional[_SleepStageSummary] = None
+    respiratory_rate: float | None = None
+    sleep_consistency_percentage: float | None = None
+    sleep_efficiency_percentage: float | None = None
+    sleep_performance_percentage: float | None = None
+    sleep_needed: _SleepNeeded | None = None
+    stage_summary: _SleepStageSummary | None = None
 
 
 class Sleep(_Base):
     """One sleep activity (main sleep or nap)."""
 
     id: str = Field(description="Sleep UUID.")
-    cycle_id: Optional[int] = Field(default=None, description="Parent cycle ID.")
-    start: Optional[str] = None
-    end: Optional[str] = None
-    timezone_offset: Optional[str] = None
-    nap: Optional[bool] = Field(default=None, description="True if this is a nap.")
-    score_state: Optional[str] = None
-    score: Optional[_SleepScore] = None
+    cycle_id: int | None = Field(default=None, description="Parent cycle ID.")
+    start: str | None = None
+    end: str | None = None
+    timezone_offset: str | None = None
+    nap: bool | None = Field(default=None, description="True if this is a nap.")
+    score_state: str | None = None
+    score: _SleepScore | None = None
 
-    def flatten(self) -> Dict[str, Any]:
+    def flatten(self) -> dict[str, Any]:
         s = self.score
         stage = s.stage_summary if s else None
         needed = s.sleep_needed if s else None
@@ -242,7 +243,9 @@ class Sleep(_Base):
             "in_bed_seconds": _ms_to_s(stage.total_in_bed_time_milli) if stage else None,
             "light_sleep_seconds": _ms_to_s(stage.total_light_sleep_time_milli) if stage else None,
             "rem_sleep_seconds": _ms_to_s(stage.total_rem_sleep_time_milli) if stage else None,
-            "deep_sleep_seconds": _ms_to_s(stage.total_slow_wave_sleep_time_milli) if stage else None,
+            "deep_sleep_seconds": _ms_to_s(stage.total_slow_wave_sleep_time_milli)
+            if stage
+            else None,
             "awake_seconds": _ms_to_s(stage.total_awake_time_milli) if stage else None,
             "no_data_seconds": _ms_to_s(stage.total_no_data_time_milli) if stage else None,
             "sleep_cycle_count": stage.sleep_cycle_count if stage else None,
@@ -255,43 +258,43 @@ class Sleep(_Base):
 
 
 class _ZoneDurations(_Base):
-    zone_zero_milli: Optional[int] = None
-    zone_one_milli: Optional[int] = None
-    zone_two_milli: Optional[int] = None
-    zone_three_milli: Optional[int] = None
-    zone_four_milli: Optional[int] = None
-    zone_five_milli: Optional[int] = None
+    zone_zero_milli: int | None = None
+    zone_one_milli: int | None = None
+    zone_two_milli: int | None = None
+    zone_three_milli: int | None = None
+    zone_four_milli: int | None = None
+    zone_five_milli: int | None = None
 
 
 class _WorkoutScore(_Base):
-    strain: Optional[float] = None
-    kilojoule: Optional[float] = None
-    average_heart_rate: Optional[int] = None
-    max_heart_rate: Optional[int] = None
-    percent_recorded: Optional[float] = None
-    distance_meter: Optional[float] = None
-    altitude_change_meter: Optional[float] = None
-    altitude_gain_meter: Optional[float] = None
-    zone_durations: Optional[_ZoneDurations] = None
+    strain: float | None = None
+    kilojoule: float | None = None
+    average_heart_rate: int | None = None
+    max_heart_rate: int | None = None
+    percent_recorded: float | None = None
+    distance_meter: float | None = None
+    altitude_change_meter: float | None = None
+    altitude_gain_meter: float | None = None
+    zone_durations: _ZoneDurations | None = None
 
 
 class Workout(_Base):
     """One recorded workout."""
 
     id: str = Field(description="Workout UUID.")
-    start: Optional[str] = None
-    end: Optional[str] = None
-    timezone_offset: Optional[str] = None
-    sport_id: Optional[int] = None
-    sport_name: Optional[str] = None
-    score_state: Optional[str] = None
-    score: Optional[_WorkoutScore] = None
+    start: str | None = None
+    end: str | None = None
+    timezone_offset: str | None = None
+    sport_id: int | None = None
+    sport_name: str | None = None
+    score_state: str | None = None
+    score: _WorkoutScore | None = None
 
-    def flatten(self) -> Dict[str, Any]:
+    def flatten(self) -> dict[str, Any]:
         s = self.score
         zones = s.zone_durations if s else None
 
-        zone_durations_seconds: Optional[Dict[str, Optional[float]]] = None
+        zone_durations_seconds: dict[str, float | None] | None = None
         if zones is not None:
             zone_durations_seconds = {
                 "zone_zero": _ms_to_s(zones.zone_zero_milli),
@@ -325,6 +328,6 @@ class Workout(_Base):
 # ---------- Convenience helpers ----------
 
 
-def flatten_list(model_cls: type, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def flatten_list(model_cls: type[_Base], records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Flatten a list of raw records through a given model class."""
     return [model_cls.model_validate(r).flatten() for r in records]

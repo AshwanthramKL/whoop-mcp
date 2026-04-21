@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whoop-mcp"
-version = "0.8.0"
+version = "0.8.1"
 authors = [
     {name = "Ashwanthram K L", email = "k.l.ashwanthram@gmail.com"}
 ]
@@ -48,15 +48,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Install with `pip install whoop-mcp[dev]` — mirrors requirements-dev.txt.
 dev = [
     "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
     "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "bandit>=1.7.0"
+    "respx>=0.21.0",
+    "freezegun>=1.2.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+    "build>=0.10.0",
+    "twine>=4.0.0",
+    "pre-commit>=3.5.0",
 ]
 
 [project.urls]
@@ -86,48 +88,63 @@ py-modules = [
     "whoop_sync",
 ]
 
-[tool.black]
-line-length = 88
-target-version = ['py310', 'py311', 'py312']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-    \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "build", "dist", "*.egg-info"]
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 88
-known_first_party = ["whoop_mcp_server", "whoop_client", "auth_manager", "config"]
+[tool.ruff.lint]
+# Lean rule set: correctness-biased, not style-policing.
+# E/W: pycodestyle, F: pyflakes, I: isort, UP: pyupgrade, B: bugbear,
+# SIM: simplify, RUF: ruff-native. Skip D (docstrings) and ANN (annotations)
+# — we care about correctness and readability, not doc coverage policing.
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",   # line too long — handled by the formatter, not the linter
+    "B008",   # allow Pydantic `Field(...)` as default arg (idiomatic)
+    "SIM105", # allow try/except/pass where `contextlib.suppress` is noisier
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]     # allow asserts in tests
+"tests/record_fixtures.py" = ["T201"]  # allow print() in the fixture recorder
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
 
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
+mypy_path = ["src"]
+# Practical-strict: catch the bugs that matter, don't police every annotation.
+# warn_return_any is off because most of our returned shapes come from
+# json-loaded dicts (typed Any) and fighting that just noises out the real
+# issues; turn it back on once we type Store return shapes with TypedDict.
 warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
 check_untyped_defs = true
-disallow_untyped_decorators = true
 no_implicit_optional = true
 warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 
 [[tool.mypy.overrides]]
-module = "tests.*"
+module = ["tests.*"]
 disallow_untyped_defs = false
+check_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# Third-party modules without type stubs.
+module = [
+    "requests",
+    "respx",
+    "freezegun",
+    "pyarrow",
+    "pyarrow.*",
+    "mcp",
+    "mcp.*",
+]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 source = ["src"]

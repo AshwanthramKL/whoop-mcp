@@ -12,6 +12,7 @@ Orchestration logic:
 - Partial failure -> null field + warning entry.
 - All-fail -> error envelope.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -20,7 +21,6 @@ import pytest
 
 import whoop_mcp_server as server
 from whoop_client import UpstreamError
-
 
 # ---------- shared stub ----------
 
@@ -63,7 +63,9 @@ def _cycle(id_: int, start: str, end: str | None, score_state: str = "SCORED") -
             "kilojoule": 4184.0,  # ~1000 kcal
             "average_heart_rate": 70,
             "max_heart_rate": 140,
-        } if score_state == "SCORED" else None,
+        }
+        if score_state == "SCORED"
+        else None,
         "created_at": "2026-04-20T10:00:00.000Z",
         "updated_at": "2026-04-20T10:00:00.000Z",
     }
@@ -82,7 +84,9 @@ def _recovery(cycle_id: int, sleep_id: str, score_state: str = "SCORED") -> dict
             "spo2_percentage": 97.0,
             "skin_temp_celsius": 34.0,
             "user_calibrating": False,
-        } if score_state == "SCORED" else None,
+        }
+        if score_state == "SCORED"
+        else None,
         "created_at": "2026-04-21T05:00:00.000Z",
         "updated_at": "2026-04-21T05:00:00.000Z",
     }
@@ -175,21 +179,31 @@ async def test_daily_summary_happy(stub_client):
     cycle = _cycle(100, "2026-04-20T00:10:00.000Z", "2026-04-21T00:05:00.000Z")
     rec = _recovery(100, "sleep-primary")
     primary = _sleep(
-        "sleep-primary", 100, "2026-04-20T22:00:00.000Z",
-        "2026-04-21T06:00:00.000Z", nap=False, in_bed_milli=28000000,
+        "sleep-primary",
+        100,
+        "2026-04-20T22:00:00.000Z",
+        "2026-04-21T06:00:00.000Z",
+        nap=False,
+        in_bed_milli=28000000,
     )
     nap = _sleep(
-        "sleep-nap", 100, "2026-04-20T13:00:00.000Z",
-        "2026-04-20T13:30:00.000Z", nap=True, in_bed_milli=1800000,
+        "sleep-nap",
+        100,
+        "2026-04-20T13:00:00.000Z",
+        "2026-04-20T13:30:00.000Z",
+        nap=True,
+        in_bed_milli=1800000,
     )
     short_sleep = _sleep(
-        "sleep-short", 100, "2026-04-20T01:00:00.000Z",
-        "2026-04-20T02:00:00.000Z", nap=False, in_bed_milli=3600000,
+        "sleep-short",
+        100,
+        "2026-04-20T01:00:00.000Z",
+        "2026-04-20T02:00:00.000Z",
+        nap=False,
+        in_bed_milli=3600000,
     )
     wout = _workout("wout-1", "2026-04-20T14:00:00.000Z", "2026-04-20T14:30:00.000Z")
-    off_day_wout = _workout(
-        "wout-off", "2026-04-19T14:00:00.000Z", "2026-04-19T14:30:00.000Z"
-    )
+    off_day_wout = _workout("wout-off", "2026-04-19T14:00:00.000Z", "2026-04-19T14:30:00.000Z")
 
     stub_client.list_cycles.return_value = [cycle]
     stub_client.get_cycle_recovery.return_value = rec
@@ -255,8 +269,12 @@ async def test_daily_summary_no_cycle(stub_client):
 async def test_daily_summary_recovery_fails(stub_client):
     cycle = _cycle(200, "2026-04-20T00:10:00.000Z", "2026-04-21T00:05:00.000Z")
     primary = _sleep(
-        "s1", 200, "2026-04-20T22:00:00.000Z",
-        "2026-04-21T06:00:00.000Z", nap=False, in_bed_milli=28000000,
+        "s1",
+        200,
+        "2026-04-20T22:00:00.000Z",
+        "2026-04-21T06:00:00.000Z",
+        nap=False,
+        in_bed_milli=28000000,
     )
 
     stub_client.list_cycles.return_value = [cycle]
@@ -300,12 +318,20 @@ async def test_daily_summary_all_fail_returns_error_envelope(stub_client):
 async def test_daily_summary_ignores_sleep_from_other_cycle(stub_client):
     cycle = _cycle(300, "2026-04-20T00:10:00.000Z", "2026-04-21T00:05:00.000Z")
     other_cycle_sleep = _sleep(
-        "other", 999, "2026-04-20T22:00:00.000Z",
-        "2026-04-21T06:00:00.000Z", nap=False, in_bed_milli=30000000,
+        "other",
+        999,
+        "2026-04-20T22:00:00.000Z",
+        "2026-04-21T06:00:00.000Z",
+        nap=False,
+        in_bed_milli=30000000,
     )
     own_sleep = _sleep(
-        "own", 300, "2026-04-20T22:00:00.000Z",
-        "2026-04-21T06:00:00.000Z", nap=False, in_bed_milli=28000000,
+        "own",
+        300,
+        "2026-04-20T22:00:00.000Z",
+        "2026-04-21T06:00:00.000Z",
+        nap=False,
+        in_bed_milli=28000000,
     )
 
     stub_client.list_cycles.return_value = [cycle]

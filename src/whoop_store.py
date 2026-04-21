@@ -33,6 +33,7 @@ Schema (v1):
         status TEXT | error_message TEXT NULL
         since_cursor TEXT NULL | until_cursor TEXT NULL
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -41,11 +42,12 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any
 
-__all__ = ["WhoopStore", "SCHEMA_VERSION", "RECORD_TABLES", "SNAPSHOT_TABLES"]
+__all__ = ["RECORD_TABLES", "SCHEMA_VERSION", "SNAPSHOT_TABLES", "WhoopStore"]
 
 
 SCHEMA_VERSION = 1
@@ -72,7 +74,7 @@ class WhoopStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         self._lock = threading.RLock()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
 
     # ----- lifecycle -----
 
@@ -105,7 +107,7 @@ class WhoopStore:
                 finally:
                     self._conn = None
 
-    def __enter__(self) -> "WhoopStore":
+    def __enter__(self) -> WhoopStore:
         self.init_schema()
         return self
 
@@ -149,9 +151,7 @@ class WhoopStore:
                     conn.execute(
                         f"CREATE INDEX IF NOT EXISTS idx_{table}_updated_at ON {table}(updated_at)"
                     )
-                    conn.execute(
-                        f"CREATE INDEX IF NOT EXISTS idx_{table}_start ON {table}(start)"
-                    )
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_start ON {table}(start)")
                 for table in CYCLE_CHILD_TABLES:
                     conn.execute(
                         f"CREATE INDEX IF NOT EXISTS idx_{table}_cycle_id ON {table}(cycle_id)"
@@ -195,7 +195,7 @@ class WhoopStore:
     def upsert_records(
         self,
         table: str,
-        rows: Iterable[Tuple[Dict[str, Any], Dict[str, Any]]],
+        rows: Iterable[tuple[dict[str, Any], dict[str, Any]]],
     ) -> int:
         """Insert or replace records, honoring the ``updated_at`` staleness guard.
 
@@ -225,7 +225,9 @@ class WhoopStore:
                     pk_s = str(pk)
                     updated_at = raw.get("updated_at")
                     if not updated_at:
-                        logger.warning("upsert_records skip: no updated_at for %s id=%s", table, pk_s)
+                        logger.warning(
+                            "upsert_records skip: no updated_at for %s id=%s", table, pk_s
+                        )
                         continue
 
                     # Staleness guard: skip if existing row has >= updated_at.
@@ -288,22 +290,20 @@ class WhoopStore:
             conn = self._connect()
             with conn:
                 cur = conn.execute(
-                    '''
+                    """
                     UPDATE recoveries
                        SET start = (SELECT c.start FROM cycles c WHERE c.id = recoveries.cycle_id),
                            "end" = (SELECT c."end" FROM cycles c WHERE c.id = recoveries.cycle_id)
                      WHERE (start IS NULL OR "end" IS NULL)
                        AND cycle_id IS NOT NULL
                        AND EXISTS (SELECT 1 FROM cycles c WHERE c.id = recoveries.cycle_id)
-                    '''
+                    """
                 )
                 return cur.rowcount
 
     # ----- snapshot upsert (single "current" row) -----
 
-    def upsert_snapshot(
-        self, table: str, raw: Dict[str, Any], flat: Dict[str, Any]
-    ) -> int:
+    def upsert_snapshot(self, table: str, raw: dict[str, Any], flat: dict[str, Any]) -> int:
         """Upsert the single ``current`` row for a snapshot table.
 
         Uses a canonical SHA-256 hash of the raw payload to decide whether
@@ -353,14 +353,12 @@ class WhoopStore:
                 )
                 return 1
 
-    def get_latest_snapshot(self, table: str) -> Optional[Dict[str, Any]]:
+    def get_latest_snapshot(self, table: str) -> dict[str, Any] | None:
         if table not in SNAPSHOT_TABLES:
             raise ValueError(f"get_latest_snapshot: unknown table {table!r}")
         with self._lock:
             conn = self._connect()
-            row = conn.execute(
-                f"SELECT flat_json FROM {table} WHERE id = 'current'"
-            ).fetchone()
+            row = conn.execute(f"SELECT flat_json FROM {table} WHERE id = 'current'").fetchone()
             if row is None:
                 return None
             return json.loads(row["flat_json"])
@@ -371,10 +369,10 @@ class WhoopStore:
         self,
         table: str,
         *,
-        start: Optional[str],
-        end: Optional[str],
-        limit: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        start: str | None,
+        end: str | None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Return flat_json rows overlapping the window ``[start, end)``.
 
         Overlap semantics match the WHOOP API: a record is included if its
@@ -386,8 +384,8 @@ class WhoopStore:
         if table not in RECORD_TABLES:
             raise ValueError(f"query_range: unknown table {table!r}")
 
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if start is not None:
             # Record ended at/after window_start, or is still in progress.
             clauses.append("(end > ? OR end IS NULL)")
@@ -410,9 +408,9 @@ class WhoopStore:
     def iter_records(
         self,
         resource: str,
-        start: Optional[str],
-        end: Optional[str],
-    ) -> Iterator[Dict[str, Any]]:
+        start: str | None,
+        end: str | None,
+    ) -> Iterator[dict[str, Any]]:
         """Yield decoded flat_json dicts for a resource overlapping ``[start, end]``.
 
         Overlap semantics match ``query_range`` / the WHOOP API: a record is
@@ -437,8 +435,8 @@ class WhoopStore:
         if resource not in RECORD_TABLES:
             raise ValueError(f"iter_records: unknown resource {resource!r}")
 
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if start is not None:
             clauses.append("(end >= ? OR end IS NULL)")
             params.append(start)
@@ -461,8 +459,8 @@ class WhoopStore:
         until: str,
         limit: int,
         *,
-        since_cursor: Optional[Tuple[str, str, str]] = None,
-    ) -> Iterator[Dict[str, Any]]:
+        since_cursor: tuple[str, str, str] | None = None,
+    ) -> Iterator[dict[str, Any]]:
         """Yield ``{resource, id, updated_at, record}`` dicts across resources.
 
         Half-open window: ``updated_at > since AND updated_at < until`` —
@@ -503,7 +501,7 @@ class WhoopStore:
             "profile_snapshots": "profile",
         }
 
-        tables: List[Tuple[str, str]] = []  # (table, public_resource)
+        tables: list[tuple[str, str]] = []  # (table, public_resource)
         for r in resources:
             if r not in alias:
                 raise ValueError(f"iter_events: unknown resource {r!r}")
@@ -524,8 +522,8 @@ class WhoopStore:
         #       AND id > cursor.id)
         # When absent, fall back to the plain strict lower bound
         # ``updated_at > since`` so ISO-string callers stay back-compat.
-        parts: List[str] = []
-        params: List[Any] = []
+        parts: list[str] = []
+        params: list[Any] = []
         for table, pub in tables:
             if since_cursor is not None:
                 cts, cres, cid = since_cursor
@@ -540,9 +538,7 @@ class WhoopStore:
                 # Param order matches the placeholders above:
                 # resource, until, cursor.ts, cursor.ts, pub, cursor.res,
                 # cursor.ts, pub, cursor.res, cursor.id
-                params.extend(
-                    [pub, until, cts, cts, pub, cres, cts, pub, cres, cid]
-                )
+                params.extend([pub, until, cts, cts, pub, cres, cts, pub, cres, cid])
             else:
                 parts.append(
                     f"SELECT ? AS resource, id AS id, updated_at AS updated_at, "
@@ -550,10 +546,7 @@ class WhoopStore:
                     f"WHERE updated_at > ? AND updated_at < ?"
                 )
                 params.extend([pub, since, until])
-        sql = (
-            " UNION ALL ".join(parts)
-            + " ORDER BY updated_at ASC, resource ASC, id ASC LIMIT ?"
-        )
+        sql = " UNION ALL ".join(parts) + " ORDER BY updated_at ASC, resource ASC, id ASC LIMIT ?"
         params.append(int(limit) + 1)
 
         with self._lock:
@@ -572,7 +565,7 @@ class WhoopStore:
                 "record": record,
             }
 
-    def query_by_cycle_id(self, table: str, *, cycle_id: int) -> List[Dict[str, Any]]:
+    def query_by_cycle_id(self, table: str, *, cycle_id: int) -> list[dict[str, Any]]:
         if table not in CYCLE_CHILD_TABLES:
             raise ValueError(f"query_by_cycle_id: unknown table {table!r}")
         with self._lock:
@@ -583,14 +576,12 @@ class WhoopStore:
             ).fetchall()
             return [json.loads(r["flat_json"]) for r in rows]
 
-    def get_by_id(self, table: str, *, id: str) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, table: str, *, id: str) -> dict[str, Any] | None:
         if table not in RECORD_TABLES:
             raise ValueError(f"get_by_id: unknown table {table!r}")
         with self._lock:
             conn = self._connect()
-            row = conn.execute(
-                f"SELECT flat_json FROM {table} WHERE id = ?", (str(id),)
-            ).fetchone()
+            row = conn.execute(f"SELECT flat_json FROM {table} WHERE id = ?", (str(id),)).fetchone()
             return json.loads(row["flat_json"]) if row else None
 
     def count(self, table: str) -> int:
@@ -598,7 +589,7 @@ class WhoopStore:
             conn = self._connect()
             return conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
 
-    def get_max_updated_at(self, table: str) -> Optional[str]:
+    def get_max_updated_at(self, table: str) -> str | None:
         if table not in RECORD_TABLES:
             raise ValueError(f"get_max_updated_at: unknown table {table!r}")
         with self._lock:
@@ -608,9 +599,7 @@ class WhoopStore:
 
     # ----- sync_runs audit -----
 
-    def start_sync_run(
-        self, resource: str, *, since_cursor: Optional[str] = None
-    ) -> int:
+    def start_sync_run(self, resource: str, *, since_cursor: str | None = None) -> int:
         with self._lock:
             conn = self._connect()
             with conn:
@@ -623,6 +612,7 @@ class WhoopStore:
                     """,
                     (_utcnow_iso(), resource, since_cursor),
                 )
+                assert cur.lastrowid is not None  # INSERT always yields a rowid
                 return cur.lastrowid
 
     def finish_sync_run(
@@ -632,8 +622,8 @@ class WhoopStore:
         status: str,
         records_fetched: int = 0,
         records_upserted: int = 0,
-        until_cursor: Optional[str] = None,
-        error_message: Optional[str] = None,
+        until_cursor: str | None = None,
+        error_message: str | None = None,
     ) -> None:
         with self._lock:
             conn = self._connect()
@@ -660,7 +650,7 @@ class WhoopStore:
                     ),
                 )
 
-    def list_sync_runs(self, *, limit: int = 20) -> List[Dict[str, Any]]:
+    def list_sync_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             conn = self._connect()
             rows = conn.execute(

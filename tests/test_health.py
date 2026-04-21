@@ -4,19 +4,14 @@ M6 health_check tests.
 health_check is a read-only MCP tool that returns a structured dict
 with overall + per-component status. It must never raise.
 """
-from __future__ import annotations
 
-import os
-import sqlite3
-from pathlib import Path
-from typing import Any, Dict
+from __future__ import annotations
 
 import httpx
 import pytest
 import respx
 
 import whoop_mcp_server as server
-
 
 V2 = "https://api.prod.whoop.com/developer/v2"
 
@@ -39,7 +34,7 @@ async def test_health_check_shape(tmp_path, monkeypatch):
         "cache_writable",
         "schema_version",
     }
-    for name, check in r["checks"].items():
+    for check in r["checks"].values():
         assert "status" in check
         assert check["status"] in {"ok", "warn", "fail", "skipped"}
     assert r["server_version"].startswith("0.")
@@ -70,9 +65,7 @@ async def test_health_check_live_skipped_when_live_false(monkeypatch):
 @pytest.mark.asyncio
 @respx.mock
 async def test_health_check_live_200_is_ok(monkeypatch):
-    respx.get(f"{V2}/user/profile/basic").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(200, json={"ok": True}))
     monkeypatch.setattr(server, "_whoop_client", None)
     r = await server.health_check(live=True)
     assert r["checks"]["api_reachable"]["status"] == "ok"
@@ -81,9 +74,7 @@ async def test_health_check_live_200_is_ok(monkeypatch):
 @pytest.mark.asyncio
 @respx.mock
 async def test_health_check_live_500_is_fail(monkeypatch, no_sleep_for_health):
-    respx.get(f"{V2}/user/profile/basic").mock(
-        return_value=httpx.Response(500, text="down")
-    )
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(500, text="down"))
     monkeypatch.setattr(server, "_whoop_client", None)
     r = await server.health_check(live=True)
     assert r["checks"]["api_reachable"]["status"] == "fail"
@@ -100,9 +91,7 @@ async def test_health_check_cache_readable_reports_rows(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_health_check_cache_writable_creates_and_deletes_sentinel(
-    tmp_path, monkeypatch
-):
+async def test_health_check_cache_writable_creates_and_deletes_sentinel(tmp_path, monkeypatch):
     r = await server.health_check(live=False)
     assert r["checks"]["cache_writable"]["status"] == "ok"
 

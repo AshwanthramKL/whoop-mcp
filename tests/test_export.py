@@ -10,27 +10,25 @@ These tests exercise the tool end-to-end using an isolated per-test
 SQLite cache populated via ``store.upsert_records(...)`` with synthetic
 flat dicts. No network.
 """
+
 from __future__ import annotations
 
 import csv
-import io
 import json
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import pytest
 
 import whoop_mcp_server as server
 from whoop_store import WhoopStore
 
-
 # ---------- helpers: seed the cache with synthetic rows ----------
 
 
 def _cycle_pair(
     cycle_id: int, start: str, end: str, updated_at: str, strain: float = 10.0
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": cycle_id,
         "start": start,
@@ -59,7 +57,7 @@ def _cycle_pair(
 
 def _sleep_pair(
     sleep_id: str, cycle_id: int, start: str, end: str, updated_at: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": sleep_id,
         "cycle_id": cycle_id,
@@ -87,7 +85,7 @@ def _sleep_pair(
 
 def _recovery_pair(
     cycle_id: int, start: str, updated_at: str, score: int = 75
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": f"rec-{cycle_id}",
         "cycle_id": cycle_id,
@@ -110,7 +108,7 @@ def _recovery_pair(
 
 def _workout_pair(
     workout_id: str, start: str, end: str, updated_at: str, sport_id: int = 1
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": workout_id,
         "start": start,
@@ -145,9 +143,15 @@ def seeded_store() -> WhoopStore:
     store.upsert_records("cycles", cycles)
 
     sleeps = [
-        _sleep_pair("s-1", 1, "2026-02-10T22:00:00Z", "2026-02-11T06:00:00Z", "2026-02-11T07:00:00Z"),
-        _sleep_pair("s-2", 2, "2026-03-10T22:00:00Z", "2026-03-11T06:00:00Z", "2026-03-11T07:00:00Z"),
-        _sleep_pair("s-3", 3, "2026-04-10T22:00:00Z", "2026-04-11T06:00:00Z", "2026-04-11T07:00:00Z"),
+        _sleep_pair(
+            "s-1", 1, "2026-02-10T22:00:00Z", "2026-02-11T06:00:00Z", "2026-02-11T07:00:00Z"
+        ),
+        _sleep_pair(
+            "s-2", 2, "2026-03-10T22:00:00Z", "2026-03-11T06:00:00Z", "2026-03-11T07:00:00Z"
+        ),
+        _sleep_pair(
+            "s-3", 3, "2026-04-10T22:00:00Z", "2026-04-11T06:00:00Z", "2026-04-11T07:00:00Z"
+        ),
     ]
     store.upsert_records("sleeps", sleeps)
 
@@ -159,9 +163,19 @@ def seeded_store() -> WhoopStore:
     store.upsert_records("recoveries", recoveries)
 
     workouts = [
-        _workout_pair("w-1", "2026-02-10T17:00:00Z", "2026-02-10T18:00:00Z", "2026-02-10T18:30:00Z"),
-        _workout_pair("w-2", "2026-03-10T17:00:00Z", "2026-03-10T18:00:00Z", "2026-03-10T18:30:00Z", sport_id=45),
-        _workout_pair("w-3", "2026-04-10T17:00:00Z", "2026-04-10T18:00:00Z", "2026-04-10T18:30:00Z"),
+        _workout_pair(
+            "w-1", "2026-02-10T17:00:00Z", "2026-02-10T18:00:00Z", "2026-02-10T18:30:00Z"
+        ),
+        _workout_pair(
+            "w-2",
+            "2026-03-10T17:00:00Z",
+            "2026-03-10T18:00:00Z",
+            "2026-03-10T18:30:00Z",
+            sport_id=45,
+        ),
+        _workout_pair(
+            "w-3", "2026-04-10T17:00:00Z", "2026-04-10T18:00:00Z", "2026-04-10T18:30:00Z"
+        ),
     ]
     store.upsert_records("workouts", workouts)
 
@@ -217,15 +231,13 @@ def test_iter_records_snapshots_ignore_window(seeded_store: WhoopStore):
 
 async def test_export_csv_cycles(tmp_path: Path, seeded_store: WhoopStore):
     out = tmp_path / "cycles.csv"
-    result = await server.export_whoop(
-        kind="cycles", format="csv", path=str(out)
-    )
+    result = await server.export_whoop(kind="cycles", format="csv", path=str(out))
     assert result["status"] == "success"
     assert out.exists()
     assert result["files"][0]["records"] == 3
     assert result["files"][0]["bytes"] == out.stat().st_size
 
-    with open(out, "r", encoding="utf-8", newline="") as f:
+    with open(out, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         header = reader.fieldnames
         # Deterministic alphabetical header
@@ -242,7 +254,7 @@ async def test_export_csv_stringifies_nested(tmp_path: Path, seeded_store: Whoop
     result = await server.export_whoop(kind="sleeps", format="csv", path=str(out))
     assert result["status"] == "success"
 
-    with open(out, "r", encoding="utf-8", newline="") as f:
+    with open(out, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     assert rows
@@ -278,9 +290,7 @@ async def test_export_parquet_workouts(tmp_path: Path, seeded_store: WhoopStore)
     import pyarrow.parquet as pq
 
     out = tmp_path / "workouts.parquet"
-    result = await server.export_whoop(
-        kind="workouts", format="parquet", path=str(out)
-    )
+    result = await server.export_whoop(kind="workouts", format="parquet", path=str(out))
     assert result["status"] == "success"
     assert result["files"][0]["records"] == 3
 
@@ -297,9 +307,7 @@ async def test_export_parquet_workouts(tmp_path: Path, seeded_store: WhoopStore)
 
 async def test_export_all_writes_directory(tmp_path: Path, seeded_store: WhoopStore):
     out_dir = tmp_path / "all_export"
-    result = await server.export_whoop(
-        kind="all", format="csv", path=str(out_dir)
-    )
+    result = await server.export_whoop(kind="all", format="csv", path=str(out_dir))
     assert result["status"] == "success"
     assert out_dir.is_dir()
     resources = {f["resource"] for f in result["files"]}
@@ -312,9 +320,7 @@ async def test_export_all_writes_directory(tmp_path: Path, seeded_store: WhoopSt
 
 async def test_export_all_creates_missing_directory(tmp_path: Path, seeded_store: WhoopStore):
     nested = tmp_path / "does-not-exist-yet" / "sub"
-    result = await server.export_whoop(
-        kind="all", format="jsonl", path=str(nested)
-    )
+    result = await server.export_whoop(kind="all", format="jsonl", path=str(nested))
     assert result["status"] == "success"
     assert nested.is_dir()
 
@@ -325,18 +331,14 @@ async def test_export_all_creates_missing_directory(tmp_path: Path, seeded_store
 async def test_export_cache_empty(tmp_path: Path):
     # Fresh isolated store — do NOT seed.
     out = tmp_path / "cycles.csv"
-    result = await server.export_whoop(
-        kind="cycles", format="csv", path=str(out)
-    )
+    result = await server.export_whoop(kind="cycles", format="csv", path=str(out))
     assert "error" in result
     assert result["error"]["code"] == "CACHE_EMPTY"
     assert "sync_whoop" in result["error"]["message"]
     assert not out.exists()
 
 
-async def test_export_file_exists_without_overwrite(
-    tmp_path: Path, seeded_store: WhoopStore
-):
+async def test_export_file_exists_without_overwrite(tmp_path: Path, seeded_store: WhoopStore):
     out = tmp_path / "cycles.csv"
     r1 = await server.export_whoop(kind="cycles", format="csv", path=str(out))
     assert r1["status"] == "success"
@@ -345,29 +347,21 @@ async def test_export_file_exists_without_overwrite(
     assert r2["error"]["code"] == "FILE_EXISTS"
 
 
-async def test_export_overwrite_replaces(
-    tmp_path: Path, seeded_store: WhoopStore
-):
+async def test_export_overwrite_replaces(tmp_path: Path, seeded_store: WhoopStore):
     out = tmp_path / "cycles.csv"
     await server.export_whoop(kind="cycles", format="csv", path=str(out))
-    r2 = await server.export_whoop(
-        kind="cycles", format="csv", path=str(out), overwrite=True
-    )
+    r2 = await server.export_whoop(kind="cycles", format="csv", path=str(out), overwrite=True)
     assert r2["status"] == "success"
 
 
 async def test_export_invalid_format(tmp_path: Path, seeded_store: WhoopStore):
-    result = await server.export_whoop(
-        kind="cycles", format="xml", path=str(tmp_path / "c.xml")
-    )
+    result = await server.export_whoop(kind="cycles", format="xml", path=str(tmp_path / "c.xml"))
     assert "error" in result
     assert result["error"]["code"] == "VALIDATION_ERROR"
 
 
 async def test_export_invalid_kind(tmp_path: Path, seeded_store: WhoopStore):
-    result = await server.export_whoop(
-        kind="naps", format="csv", path=str(tmp_path / "c.csv")
-    )
+    result = await server.export_whoop(kind="naps", format="csv", path=str(tmp_path / "c.csv"))
     assert "error" in result
     assert result["error"]["code"] == "VALIDATION_ERROR"
 
@@ -386,9 +380,7 @@ async def test_export_bad_date(tmp_path: Path, seeded_store: WhoopStore):
 # ---------- Range filter ----------
 
 
-async def test_export_range_trims_to_middle_month(
-    tmp_path: Path, seeded_store: WhoopStore
-):
+async def test_export_range_trims_to_middle_month(tmp_path: Path, seeded_store: WhoopStore):
     # Seeded cycles: Feb 10, Mar 10, Apr 10.
     out = tmp_path / "cycles.csv"
     result = await server.export_whoop(
@@ -401,7 +393,7 @@ async def test_export_range_trims_to_middle_month(
     assert result["status"] == "success"
     assert result["files"][0]["records"] == 1
 
-    with open(out, "r", encoding="utf-8", newline="") as f:
+    with open(out, encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["id"] == "2"
 
@@ -425,9 +417,7 @@ async def test_export_empty_window_still_writes_csv_header(
     assert out.exists()
 
 
-async def test_export_empty_window_jsonl_empty_file(
-    tmp_path: Path, seeded_store: WhoopStore
-):
+async def test_export_empty_window_jsonl_empty_file(tmp_path: Path, seeded_store: WhoopStore):
     out = tmp_path / "cycles.jsonl"
     result = await server.export_whoop(
         kind="cycles",

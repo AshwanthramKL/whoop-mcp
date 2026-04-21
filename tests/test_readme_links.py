@@ -11,12 +11,12 @@ Walk both documents, extract every markdown link, and assert that:
 External ``http(s)://`` links are out of scope — this test never hits
 the network.
 """
+
 from __future__ import annotations
 
 import os
 import re
 from pathlib import Path
-from typing import List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,15 +37,15 @@ def _slugify(heading: str) -> str:
     return s
 
 
-def _extract_headings(text: str) -> List[str]:
+def _extract_headings(text: str) -> list[str]:
     return [_slugify(m.group(2)) for m in _HEADING_RE.finditer(text)]
 
 
-def _extract_links(text: str) -> List[str]:
+def _extract_links(text: str) -> list[str]:
     return _LINK_RE.findall(text)
 
 
-def _classify(target: str) -> Tuple[str, str, str]:
+def _classify(target: str) -> tuple[str, str, str]:
     """Return (kind, path_part, anchor_part) for a link target.
 
     kind ∈ {"external", "anchor", "file", "file+anchor"}
@@ -60,11 +60,11 @@ def _classify(target: str) -> Tuple[str, str, str]:
     return ("file", target, "")
 
 
-def _check_document(doc_path: Path) -> List[str]:
+def _check_document(doc_path: Path) -> list[str]:
     """Return a list of human-readable failure strings (empty = clean)."""
     text = doc_path.read_text(encoding="utf-8")
     headings = set(_extract_headings(text))
-    failures: List[str] = []
+    failures: list[str] = []
 
     for raw in _extract_links(text):
         target = raw.strip()

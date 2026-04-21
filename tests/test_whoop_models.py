@@ -11,6 +11,7 @@ Rules under test (see M2 spec):
 - Null handling: score_state != SCORED -> score fields null, score_state kept
   at top level.
 """
+
 from __future__ import annotations
 
 import copy
@@ -25,7 +26,6 @@ from whoop_models import (
     Sleep,
     Workout,
 )
-
 
 # ---------- Profile ----------
 

@@ -5,6 +5,7 @@ The list/get tools now accept ``fresh: bool``. By default they consult the
 cache first and only fall back to an API call (and then upsert the results)
 when the cache is empty for the requested window.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,7 +56,12 @@ def _cycle_raw(cid: int, start: str, updated_at: str) -> dict:
         "end": start.replace("T00:", "T23:"),
         "updated_at": updated_at,
         "score_state": "SCORED",
-        "score": {"strain": 5.0, "kilojoule": 4000.0, "average_heart_rate": 65, "max_heart_rate": 130},
+        "score": {
+            "strain": 5.0,
+            "kilojoule": 4000.0,
+            "average_heart_rate": 65,
+            "max_heart_rate": 130,
+        },
     }
 
 
@@ -67,6 +73,7 @@ async def test_list_cycles_fresh_false_reads_from_cache_zero_api(tmp_store, stub
     # Populate cache directly
     raw = _cycle_raw(1, "2026-04-20T00:00:00Z", "2026-04-21T06:00:00Z")
     from whoop_models import Cycle
+
     flat = Cycle.model_validate(raw).flatten()
     tmp_store.upsert_records("cycles", [(raw, flat)])
 

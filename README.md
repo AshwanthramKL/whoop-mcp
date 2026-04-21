@@ -1,10 +1,11 @@
 # WHOOP MCP Server
 
+[![CI](https://github.com/AshwanthramKL/whoop-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/AshwanthramKL/whoop-mcp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/whoop-mcp.svg)](https://pypi.org/project/whoop-mcp/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-6e6eff.svg)](https://modelcontextprotocol.io)
 [![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen.svg)](./tests)
-[![Version](https://img.shields.io/badge/version-0.8.0-informational.svg)](./CHANGELOG.md)
 
 A local Model Context Protocol (MCP) server that gives an LLM **read-only**
 access to your WHOOP fitness data. Authentication is direct OAuth against
@@ -14,7 +15,7 @@ All records are mirrored into a local SQLite cache at
 except for the authenticated calls the server itself makes to the WHOOP
 v2 API.
 
-Current version: **0.8.0** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **0.8.1** — see [CHANGELOG.md](./CHANGELOG.md).
 
 > **Pre-1.0 status.** The API surface (tool names, response shapes, error
 > codes) is stabilizing but not frozen. Breaking changes may land in
@@ -430,7 +431,7 @@ call is respx-mocked so you can iterate offline.
 
 ## Versioning
 
-Current version: **0.8.0** (see `src/__version__.py`). Semantic
+Current version: **0.8.1** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits

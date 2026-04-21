@@ -5,10 +5,10 @@ We never hit real disk or the real OAuth layer during unit tests. The
 `whoop_access_token` fixture monkeypatches ``TokenManager.get_valid_access_token``
 so client construction + HTTP calls use a stable fake token.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -84,9 +84,7 @@ def whoop_access_token(request, monkeypatch):
     monkeypatch.setattr(
         auth_manager.TokenManager, "get_valid_access_token", _fake_get_valid_access_token
     )
-    monkeypatch.setattr(
-        auth_manager.TokenManager, "get_token_info", _fake_get_token_info
-    )
+    monkeypatch.setattr(auth_manager.TokenManager, "get_token_info", _fake_get_token_info)
     monkeypatch.setattr(auth_manager.TokenManager, "__init__", _fake_init)
     yield
 
@@ -96,8 +94,7 @@ def load_fixture(name: str) -> dict:
     path = FIXTURES_DIR / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(
-            f"Fixture {name!r} not found at {path}. "
-            "Run tests/record_fixtures.py to regenerate."
+            f"Fixture {name!r} not found at {path}. Run tests/record_fixtures.py to regenerate."
         )
     return json.loads(path.read_text())
 

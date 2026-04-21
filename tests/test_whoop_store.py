@@ -11,17 +11,15 @@ The store is the only place that talks to sqlite. It knows:
 No network, no Pydantic here — the store takes flat JSON dicts from the caller
 and stores both raw and flat representations verbatim.
 """
+
 from __future__ import annotations
 
-import json
 import os
-import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from whoop_store import WhoopStore, SCHEMA_VERSION
+from whoop_store import SCHEMA_VERSION, WhoopStore
 
 
 @pytest.fixture
@@ -44,7 +42,12 @@ def _raw_cycle(cycle_id: int, start: str, end: str, updated_at: str) -> dict:
         "end": end,
         "updated_at": updated_at,
         "score_state": "SCORED",
-        "score": {"strain": 10.0, "average_heart_rate": 70, "max_heart_rate": 150, "kilojoule": 8000.0},
+        "score": {
+            "strain": 10.0,
+            "average_heart_rate": 70,
+            "max_heart_rate": 150,
+            "kilojoule": 8000.0,
+        },
     }
 
 
@@ -151,11 +154,13 @@ def test_upsert_skips_when_updated_at_older(store: WhoopStore):
 
 
 def test_range_query_by_start(store: WhoopStore):
-    for i, (s, e) in enumerate([
-        ("2026-04-18T00:00:00Z", "2026-04-19T00:00:00Z"),
-        ("2026-04-19T00:00:00Z", "2026-04-20T00:00:00Z"),
-        ("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
-    ]):
+    for i, (s, e) in enumerate(
+        [
+            ("2026-04-18T00:00:00Z", "2026-04-19T00:00:00Z"),
+            ("2026-04-19T00:00:00Z", "2026-04-20T00:00:00Z"),
+            ("2026-04-20T00:00:00Z", "2026-04-21T00:00:00Z"),
+        ]
+    ):
         raw = _raw_cycle(1000 + i, s, e, "2026-04-21T06:00:00Z")
         flat = _flat_cycle(1000 + i, s, e)
         store.upsert_records("cycles", [(raw, flat)])
@@ -173,10 +178,17 @@ def test_recovery_start_end_inherited_from_cycle(store: WhoopStore):
     """Regression: WHOOP v2 recoveries lack their own start/end. Upsert must
     inherit them from the linked cycle so date-window queries work."""
     # Insert the parent cycle first.
-    store.upsert_records("cycles", [(
-        _raw_cycle(4001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"),
-        _flat_cycle(4001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
-    )])
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(
+                    4001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"
+                ),
+                _flat_cycle(4001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
+            )
+        ],
+    )
     # Recovery raw payload with NO start/end (as WHOOP actually returns).
     raw_rec = {
         "cycle_id": 4001,
@@ -185,7 +197,12 @@ def test_recovery_start_end_inherited_from_cycle(store: WhoopStore):
         "score_state": "SCORED",
         "score": {"recovery_score": 72, "hrv_rmssd_milli": 45.0, "resting_heart_rate": 58},
     }
-    flat_rec = {"cycle_id": 4001, "sleep_id": "s-4001", "score_state": "SCORED", "recovery_score": 72.0}
+    flat_rec = {
+        "cycle_id": 4001,
+        "sleep_id": "s-4001",
+        "score_state": "SCORED",
+        "recovery_score": 72.0,
+    }
     store.upsert_records("recoveries", [(raw_rec, flat_rec)])
 
     # Querying by cycle's date window must return the recovery.
@@ -210,21 +227,26 @@ def test_backfill_recovery_windows(store: WhoopStore):
     }
     store.upsert_records("recoveries", [(raw_rec, {"cycle_id": 5001, "score_state": "SCORED"})])
     # Nothing to inherit yet — start/end should be NULL.
-    pre = store.query_range("recoveries",
-                            start="2026-04-19T00:00:00Z", end="2026-04-20T00:00:00Z")
+    pre = store.query_range("recoveries", start="2026-04-19T00:00:00Z", end="2026-04-20T00:00:00Z")
     assert len(pre) == 0
 
     # Now cycle arrives.
-    store.upsert_records("cycles", [(
-        _raw_cycle(5001, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z", "2026-04-19T08:00:00Z"),
-        _flat_cycle(5001, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z"),
-    )])
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(
+                    5001, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z", "2026-04-19T08:00:00Z"
+                ),
+                _flat_cycle(5001, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z"),
+            )
+        ],
+    )
     # Run backfill.
     n = store.backfill_recovery_windows()
     assert n == 1, "one recovery row should be patched"
 
-    post = store.query_range("recoveries",
-                             start="2026-04-19T00:00:00Z", end="2026-04-20T00:00:00Z")
+    post = store.query_range("recoveries", start="2026-04-19T00:00:00Z", end="2026-04-20T00:00:00Z")
     assert len(post) == 1
 
 
@@ -235,20 +257,39 @@ def test_range_query_uses_overlap_semantics(store: WhoopStore):
     Filtering by ``start >= window_start`` alone would wrongly exclude them.
     """
     # Cycle starts 21:23 on Apr 18, ends 07:12 on Apr 19 — spans into the window.
-    store.upsert_records("cycles", [(
-        _raw_cycle(2001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"),
-        _flat_cycle(2001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
-    )])
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(
+                    2001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"
+                ),
+                _flat_cycle(2001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
+            )
+        ],
+    )
     # In-progress cycle: start before window end, end is NULL.
-    store.upsert_records("cycles", [(
-        _raw_cycle(2002, "2026-04-20T22:00:00Z", None, "2026-04-20T22:00:00Z"),
-        _flat_cycle(2002, "2026-04-20T22:00:00Z", None),
-    )])
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(2002, "2026-04-20T22:00:00Z", None, "2026-04-20T22:00:00Z"),
+                _flat_cycle(2002, "2026-04-20T22:00:00Z", None),
+            )
+        ],
+    )
     # Cycle fully outside the window.
-    store.upsert_records("cycles", [(
-        _raw_cycle(2003, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", "2026-04-11T00:00:00Z"),
-        _flat_cycle(2003, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z"),
-    )])
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(
+                    2003, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", "2026-04-11T00:00:00Z"
+                ),
+                _flat_cycle(2003, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z"),
+            )
+        ],
+    )
 
     rows = store.query_range(
         "cycles",
@@ -263,25 +304,42 @@ def test_range_query_uses_overlap_semantics(store: WhoopStore):
 
 def test_iter_records_uses_overlap_semantics(store: WhoopStore):
     """Same overlap regression for ``iter_records`` (exports path)."""
-    store.upsert_records("cycles", [(
-        _raw_cycle(3001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"),
-        _flat_cycle(3001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
-    )])
-    store.upsert_records("cycles", [(
-        _raw_cycle(3002, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", "2026-04-11T00:00:00Z"),
-        _flat_cycle(3002, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z"),
-    )])
-    ids = {r["id"] for r in store.iter_records(
-        "cycles", start="2026-04-19T00:00:00Z", end="2026-04-21T00:00:00Z"
-    )}
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(
+                    3001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"
+                ),
+                _flat_cycle(3001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
+            )
+        ],
+    )
+    store.upsert_records(
+        "cycles",
+        [
+            (
+                _raw_cycle(
+                    3002, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z", "2026-04-11T00:00:00Z"
+                ),
+                _flat_cycle(3002, "2026-04-10T00:00:00Z", "2026-04-11T00:00:00Z"),
+            )
+        ],
+    )
+    ids = {
+        r["id"]
+        for r in store.iter_records(
+            "cycles", start="2026-04-19T00:00:00Z", end="2026-04-21T00:00:00Z"
+        )
+    }
     assert 3001 in ids
     assert 3002 not in ids
 
 
 def test_query_limit(store: WhoopStore):
     for i in range(5):
-        s = f"2026-04-{10+i:02d}T00:00:00Z"
-        e = f"2026-04-{11+i:02d}T00:00:00Z"
+        s = f"2026-04-{10 + i:02d}T00:00:00Z"
+        e = f"2026-04-{11 + i:02d}T00:00:00Z"
         raw = _raw_cycle(1000 + i, s, e, "2026-04-21T06:00:00Z")
         flat = _flat_cycle(1000 + i, s, e)
         store.upsert_records("cycles", [(raw, flat)])
@@ -336,7 +394,9 @@ def test_profile_snapshot_upsert(store: WhoopStore):
     assert latest["email"] == "a@b.c"
 
     # Update keeps only current
-    store.upsert_snapshot("profile_snapshots", dict(raw, first_name="A2"), dict(flat, first_name="A2"))
+    store.upsert_snapshot(
+        "profile_snapshots", dict(raw, first_name="A2"), dict(flat, first_name="A2")
+    )
     latest2 = store.get_latest_snapshot("profile_snapshots")
     assert latest2["first_name"] == "A2"
 
@@ -391,18 +451,14 @@ def test_snapshot_unchanged_payload_does_not_bump_updated_at(store: WhoopStore):
 
     # Capture the stored updated_at.
     conn = store._connect()
-    row = conn.execute(
-        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
-    ).fetchone()
+    row = conn.execute("SELECT updated_at FROM profile_snapshots WHERE id='current'").fetchone()
     ts_before = row["updated_at"]
 
     # Repeated upsert, identical payload.
     changed_2 = store.upsert_snapshot("profile_snapshots", raw, flat)
     assert changed_2 == 0, "identical payload must not count as a change"
 
-    row2 = conn.execute(
-        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
-    ).fetchone()
+    row2 = conn.execute("SELECT updated_at FROM profile_snapshots WHERE id='current'").fetchone()
     assert row2["updated_at"] == ts_before, (
         "updated_at must be preserved when raw_json is unchanged"
     )
@@ -440,9 +496,9 @@ def test_snapshot_idempotent_sync_produces_no_events(store: WhoopStore):
 
     # Capture the timestamp after the first write.
     conn = store._connect()
-    ts = conn.execute(
-        "SELECT updated_at FROM profile_snapshots WHERE id='current'"
-    ).fetchone()["updated_at"]
+    ts = conn.execute("SELECT updated_at FROM profile_snapshots WHERE id='current'").fetchone()[
+        "updated_at"
+    ]
 
     # A second identical write should not produce a new event after ``ts``.
     store.upsert_snapshot("profile_snapshots", raw, flat)

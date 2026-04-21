@@ -22,9 +22,15 @@ single source of truth for the version number.
 ```bash
 cd /path/to/whoop-mcp
 .venv/bin/pytest -q          # must be all green at baseline
+.venv/bin/ruff check src/ tests/   # must be clean
+.venv/bin/mypy src/                # must be clean
 ```
 
-If baseline is not green, stop and report. Don't build on broken ground.
+If any of the three is not green, stop and report. Don't build on broken ground.
+
+**Install the pre-commit hooks once:** `.venv/bin/pre-commit install`.
+After that, ruff + ruff-format + mypy run automatically on `git commit`,
+so you'll catch drift at commit time instead of at CI time.
 
 Read, in order, before your first edit:
 1. `README.md` § "Tool catalog" and § "Data model"

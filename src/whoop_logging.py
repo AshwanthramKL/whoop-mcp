@@ -30,6 +30,7 @@ Structured event pattern::
 
 The ``extra=`` dict is merged into the JSON line; scalars only.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,14 +40,12 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-__all__ = ["setup", "JSONFormatter", "DEFAULT_LOG_FILE"]
+__all__ = ["DEFAULT_LOG_FILE", "JSONFormatter", "setup"]
 
 
-_DEFAULT_LOG_DIR = os.path.join(
-    os.path.expanduser("~"), ".whoop-mcp-server", "logs"
-)
+_DEFAULT_LOG_DIR = os.path.join(os.path.expanduser("~"), ".whoop-mcp-server", "logs")
 DEFAULT_LOG_FILE = os.path.join(_DEFAULT_LOG_DIR, "whoop-mcp.log")
 
 
@@ -84,11 +83,11 @@ _STD_ATTRS = frozenset(
 class JSONFormatter(logging.Formatter):
     """One-dict-per-line JSON formatter for structured logging."""
 
-    def format(self, record: logging.LogRecord) -> str:  # noqa: D401
+    def format(self, record: logging.LogRecord) -> str:
         ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%S.%fZ"
         )
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "ts": ts,
             "level": record.levelname,
             "logger": record.name,
@@ -128,7 +127,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _resolve_log_file() -> Optional[str]:
+def _resolve_log_file() -> str | None:
     """Return the log file path, or None to disable file logging."""
     env = os.getenv("WHOOP_LOG_FILE")
     if env is None:

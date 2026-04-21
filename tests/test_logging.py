@@ -8,19 +8,15 @@ Locks in:
 - Env var ``WHOOP_LOG_FILE=""`` disables file logging.
 - Access tokens / refresh tokens never appear in any log line.
 """
+
 from __future__ import annotations
 
-import io
 import json
 import logging
-import os
-import sys
-from pathlib import Path
 
 import httpx
 import pytest
 import respx
-
 
 V2 = "https://api.prod.whoop.com/developer/v2"
 
@@ -40,6 +36,7 @@ def _reset_logging(monkeypatch, **env):
 def test_setup_is_idempotent(tmp_path, monkeypatch):
     _reset_logging(monkeypatch, WHOOP_LOG_FILE=str(tmp_path / "whoop.log"))
     import whoop_logging
+
     whoop_logging.setup()
     n1 = len(logging.getLogger().handlers)
     whoop_logging.setup()
@@ -55,6 +52,7 @@ def test_json_line_structure(tmp_path, monkeypatch, capsys):
         WHOOP_LOG_LEVEL="INFO",
     )
     import whoop_logging
+
     whoop_logging.setup()
     logger = logging.getLogger("whoop.test")
     logger.info("hello", extra={"event": "api_request", "endpoint": "/cycle"})
@@ -77,6 +75,7 @@ def test_file_handler_rotates(tmp_path, monkeypatch):
         WHOOP_LOG_LEVEL="INFO",
     )
     import whoop_logging
+
     # Shrink rotation size to force a rollover quickly.
     whoop_logging.setup(max_bytes=1_000, backup_count=2)
 
@@ -97,6 +96,7 @@ def test_log_file_empty_string_disables_file_handler(tmp_path, monkeypatch):
         WHOOP_LOG_LEVEL="INFO",
     )
     import whoop_logging
+
     whoop_logging.setup()
     root = logging.getLogger()
     kinds = [type(h).__name__ for h in root.handlers]
@@ -115,11 +115,10 @@ async def test_access_token_never_in_logs(tmp_path, monkeypatch, capsys):
         WHOOP_LOG_LEVEL="DEBUG",
     )
     import whoop_logging
+
     whoop_logging.setup()
 
-    respx.get(f"{V2}/user/profile/basic").mock(
-        return_value=httpx.Response(200, json={"ok": True})
-    )
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(200, json={"ok": True}))
     client = WhoopClient()
     await client.get_profile()
 

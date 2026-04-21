@@ -9,24 +9,23 @@ with a ``resource`` tag + decoded ``record``.
 
 No network, no WHOOP API. Snapshots are surfaced as single "current" rows.
 """
+
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import pytest
 
 import whoop_mcp_server as server
 from whoop_store import WhoopStore
 
-
 # ---------- helpers ----------
 
 
 def _cycle_pair(
     cycle_id: int, start: str, end: str, updated_at: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": cycle_id,
         "start": start,
@@ -47,7 +46,7 @@ def _cycle_pair(
 
 def _sleep_pair(
     sleep_id: str, cycle_id: int, start: str, end: str, updated_at: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": sleep_id,
         "cycle_id": cycle_id,
@@ -71,7 +70,7 @@ def _sleep_pair(
 
 def _recovery_pair(
     cycle_id: int, start: str, updated_at: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": f"rec-{cycle_id}",
         "cycle_id": cycle_id,
@@ -93,7 +92,7 @@ def _recovery_pair(
 
 def _workout_pair(
     workout_id: str, start: str, end: str, updated_at: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     raw = {
         "id": workout_id,
         "start": start,
@@ -132,9 +131,15 @@ def seeded_store() -> WhoopStore:
     store.upsert_records(
         "sleeps",
         [
-            _sleep_pair("s-1", 1, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z", "2026-04-19T07:00:00Z"),
-            _sleep_pair("s-2", 2, "2026-04-19T22:00:00Z", "2026-04-20T06:00:00Z", "2026-04-20T07:00:00Z"),
-            _sleep_pair("s-3", 3, "2026-04-20T22:00:00Z", "2026-04-21T06:00:00Z", "2026-04-21T07:00:00Z"),
+            _sleep_pair(
+                "s-1", 1, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z", "2026-04-19T07:00:00Z"
+            ),
+            _sleep_pair(
+                "s-2", 2, "2026-04-19T22:00:00Z", "2026-04-20T06:00:00Z", "2026-04-20T07:00:00Z"
+            ),
+            _sleep_pair(
+                "s-3", 3, "2026-04-20T22:00:00Z", "2026-04-21T06:00:00Z", "2026-04-21T07:00:00Z"
+            ),
         ],
     )
 
@@ -152,8 +157,12 @@ def seeded_store() -> WhoopStore:
     store.upsert_records(
         "workouts",
         [
-            _workout_pair("w-1", "2026-04-18T17:00:00Z", "2026-04-18T18:00:00Z", "2026-04-18T18:30:00Z"),
-            _workout_pair("w-2", "2026-04-20T17:00:00Z", "2026-04-20T18:00:00Z", "2026-04-20T18:30:00Z"),
+            _workout_pair(
+                "w-1", "2026-04-18T17:00:00Z", "2026-04-18T18:00:00Z", "2026-04-18T18:30:00Z"
+            ),
+            _workout_pair(
+                "w-2", "2026-04-20T17:00:00Z", "2026-04-20T18:00:00Z", "2026-04-20T18:30:00Z"
+            ),
         ],
     )
     return store
@@ -202,9 +211,7 @@ def test_iter_events_respects_limit(seeded_store: WhoopStore):
 
 
 async def test_events_since_window_returns_only_newer(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-20T00:00:00Z", until="2026-04-22T00:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-04-20T00:00:00Z", until="2026-04-22T00:00:00Z")
     assert r["status"] == "success"
     assert r["count"] == len(r["events"])
     assert all(e["updated_at"] > "2026-04-20T00:00:00Z" for e in r["events"])
@@ -212,17 +219,13 @@ async def test_events_since_window_returns_only_newer(seeded_store: WhoopStore):
 
 
 async def test_events_sorted_updated_at_ascending(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-01-01T00:00:00Z", until="2030-01-01T00:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-01-01T00:00:00Z", until="2030-01-01T00:00:00Z")
     stamps = [e["updated_at"] for e in r["events"]]
     assert stamps == sorted(stamps)
 
 
 async def test_events_cross_resource_interleaving(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-19T06:00:00Z", until="2026-04-20T08:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-04-19T06:00:00Z", until="2026-04-20T08:00:00Z")
     resources = {e["resource"] for e in r["events"]}
     # We expect both cycles and sleeps in this window
     assert "sleeps" in resources
@@ -248,9 +251,7 @@ async def test_events_default_until_is_now(seeded_store: WhoopStore):
 
 
 async def test_events_empty_result(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2030-01-01T00:00:00Z", until="2030-12-31T00:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2030-01-01T00:00:00Z", until="2030-12-31T00:00:00Z")
     assert r["status"] == "success"
     assert r["events"] == []
     assert r["count"] == 0
@@ -272,6 +273,7 @@ async def test_events_limit_triggers_pagination(seeded_store: WhoopStore):
     assert r["next_cursor"]
     # Last event's updated_at must be encoded inside the cursor.
     import base64 as _b64
+
     decoded = _b64.urlsafe_b64decode(r["next_cursor"] + "==").decode("utf-8")
     assert r["events"][-1]["updated_at"] in decoded
 
@@ -288,9 +290,7 @@ async def test_events_no_truncation_means_null_cursor(seeded_store: WhoopStore):
 async def test_events_until_exclusive(seeded_store: WhoopStore):
     # cycle id=3 has updated_at exactly 2026-04-20T18:00:00Z — must be excluded
     # when until=2026-04-20T18:00:00Z.
-    r = await server.get_whoop_events(
-        since="2026-04-19T00:00:00Z", until="2026-04-20T18:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-04-19T00:00:00Z", until="2026-04-20T18:00:00Z")
     ids = {(e["resource"], str(e["id"])) for e in r["events"]}
     assert ("cycles", "3") not in ids
 
@@ -298,9 +298,7 @@ async def test_events_until_exclusive(seeded_store: WhoopStore):
 async def test_events_since_exclusive(seeded_store: WhoopStore):
     # cycle id=2 has updated_at exactly 2026-04-19T12:00:00Z — must be excluded
     # when since=2026-04-19T12:00:00Z (strict lower bound).
-    r = await server.get_whoop_events(
-        since="2026-04-19T12:00:00Z", until="2030-01-01T00:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-04-19T12:00:00Z", until="2030-01-01T00:00:00Z")
     ids = {(e["resource"], str(e["id"])) for e in r["events"]}
     assert ("cycles", "2") not in ids
 
@@ -337,9 +335,7 @@ async def test_events_snapshot_outside_window_excluded(seeded_store: WhoopStore)
 
 
 async def test_events_event_shape(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-01-01T00:00:00Z", until="2030-01-01T00:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-01-01T00:00:00Z", until="2030-01-01T00:00:00Z")
     assert r["events"]
     e = r["events"][0]
     assert set(e.keys()) >= {"resource", "id", "updated_at", "record"}
@@ -362,41 +358,31 @@ async def test_events_bad_since_parse_is_validation_error(seeded_store: WhoopSto
 
 
 async def test_events_bad_until_parse_is_validation_error(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-20T00:00:00Z", until="also-bad"
-    )
+    r = await server.get_whoop_events(since="2026-04-20T00:00:00Z", until="also-bad")
     assert "error" in r
     assert r["error"]["code"] == "VALIDATION_ERROR"
 
 
 async def test_events_until_le_since_is_validation_error(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-20T00:00:00Z", until="2026-04-20T00:00:00Z"
-    )
+    r = await server.get_whoop_events(since="2026-04-20T00:00:00Z", until="2026-04-20T00:00:00Z")
     assert "error" in r
     assert r["error"]["code"] == "VALIDATION_ERROR"
 
 
 async def test_events_unknown_resource_is_validation_error(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-20T00:00:00Z", resources=["cycles", "bogus"]
-    )
+    r = await server.get_whoop_events(since="2026-04-20T00:00:00Z", resources=["cycles", "bogus"])
     assert "error" in r
     assert r["error"]["code"] == "VALIDATION_ERROR"
 
 
 async def test_events_limit_zero_is_validation_error(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-20T00:00:00Z", limit=0
-    )
+    r = await server.get_whoop_events(since="2026-04-20T00:00:00Z", limit=0)
     assert "error" in r
     assert r["error"]["code"] == "VALIDATION_ERROR"
 
 
 async def test_events_limit_too_large_is_validation_error(seeded_store: WhoopStore):
-    r = await server.get_whoop_events(
-        since="2026-04-20T00:00:00Z", limit=10000
-    )
+    r = await server.get_whoop_events(since="2026-04-20T00:00:00Z", limit=10000)
     assert "error" in r
     assert r["error"]["code"] == "VALIDATION_ERROR"
 
@@ -426,9 +412,7 @@ async def _read_resource(uri: str) -> str:
 
 
 async def test_events_resource_two_arg(seeded_store: WhoopStore):
-    body = await _read_resource(
-        "whoop://db/events/2026-04-20T00:00:00Z/2026-04-22T00:00:00Z"
-    )
+    body = await _read_resource("whoop://db/events/2026-04-20T00:00:00Z/2026-04-22T00:00:00Z")
     data = json.loads(body)
     assert data["status"] == "success"
     assert isinstance(data["events"], list)

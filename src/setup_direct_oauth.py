@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Direct WHOOP OAuth setup — uses user's own WHOOP dev app client_id/secret."""
-import os
-import sys
+
 import secrets
+import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
@@ -15,21 +15,24 @@ import requests
 # layout lets these imports resolve without sys.path fiddling.
 from auth_manager import TokenManager
 from config import (
-    WHOOP_OAUTH_AUTH_URL,
-    WHOOP_OAUTH_TOKEN_URL,
     WHOOP_CLIENT_ID,
     WHOOP_CLIENT_SECRET,
+    WHOOP_OAUTH_AUTH_URL,
+    WHOOP_OAUTH_TOKEN_URL,
     WHOOP_REDIRECT_URI,
 )
 
-SCOPES = "read:profile read:workout read:sleep read:recovery read:cycles read:body_measurement offline"
+SCOPES = (
+    "read:profile read:workout read:sleep read:recovery read:cycles read:body_measurement offline"
+)
 
-result = {"code": None, "error": None, "state": None}
+result: dict[str, str | None] = {"code": None, "error": None, "state": None}
 expected_state = secrets.token_urlsafe(16)
 
 
 class CallbackHandler(BaseHTTPRequestHandler):
-    def log_message(self, *_): pass
+    def log_message(self, *_):
+        pass
 
     def do_GET(self):
         qs = parse_qs(urlparse(self.path).query)
@@ -41,8 +44,8 @@ class CallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
         body = (
             b"<h2>Authorization received.</h2><p>You can close this tab.</p>"
-            if result["code"] else
-            b"<h2>Authorization failed.</h2><pre>" + str(result["error"]).encode() + b"</pre>"
+            if result["code"]
+            else b"<h2>Authorization failed.</h2><pre>" + str(result["error"]).encode() + b"</pre>"
         )
         self.wfile.write(body)
 
@@ -53,24 +56,28 @@ def main():
         sys.exit(1)
 
     parsed = urlparse(WHOOP_REDIRECT_URI)
-    host, port = parsed.hostname, parsed.port or 80
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 80
     server = HTTPServer((host, port), CallbackHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    auth_url = f"{WHOOP_OAUTH_AUTH_URL}?" + urlencode({
-        "response_type": "code",
-        "client_id": WHOOP_CLIENT_ID,
-        "redirect_uri": WHOOP_REDIRECT_URI,
-        "scope": SCOPES,
-        "state": expected_state,
-    })
+    auth_url = f"{WHOOP_OAUTH_AUTH_URL}?" + urlencode(
+        {
+            "response_type": "code",
+            "client_id": WHOOP_CLIENT_ID,
+            "redirect_uri": WHOOP_REDIRECT_URI,
+            "scope": SCOPES,
+            "state": expected_state,
+        }
+    )
 
     print(f"Opening browser for WHOOP authorization...\nIf it doesn't open, visit:\n{auth_url}\n")
     webbrowser.open(auth_url)
 
-    # Wait for callback
+    # Wait for callback — the CallbackHandler (running on another thread)
+    # mutates `result` when a request arrives.
     print(f"Listening on {WHOOP_REDIRECT_URI} for the callback...")
-    while result["code"] is None and result["error"] is None:
+    while result["code"] is None and result["error"] is None:  # type: ignore[unreachable]
         pass
     server.shutdown()
 

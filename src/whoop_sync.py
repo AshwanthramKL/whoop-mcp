@@ -22,6 +22,7 @@ Design notes
 - Logs are stderr-only, structured JSON, and never include the raw
   payload bodies (only counts / status / duration).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,13 +31,13 @@ import logging
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from whoop_client import WhoopAPIError, WhoopClient
-from whoop_models import BodyMeasurement, Cycle, Profile, Recovery, Sleep, Workout
+from whoop_models import BodyMeasurement, Cycle, Profile, Recovery, Sleep, Workout, _Base
 from whoop_store import WhoopStore
 
-__all__ = ["run_sync", "DEFAULT_RESOURCES", "EARLIEST_DATE"]
+__all__ = ["DEFAULT_RESOURCES", "EARLIEST_DATE", "run_sync"]
 
 DEFAULT_RESOURCES = (
     "cycles",
@@ -77,14 +78,14 @@ def _default_since() -> str:
 
 
 # Map each "list" resource name to the client method + model class + store table.
-_LIST_RESOURCES = {
+_LIST_RESOURCES: dict[str, tuple[str, type[_Base], str]] = {
     "cycles": ("list_cycles", Cycle, "cycles"),
     "recoveries": ("list_recoveries", Recovery, "recoveries"),
     "sleeps": ("list_sleeps", Sleep, "sleeps"),
     "workouts": ("list_workouts", Workout, "workouts"),
 }
 
-_SNAPSHOT_RESOURCES = {
+_SNAPSHOT_RESOURCES: dict[str, tuple[str, type[_Base], str]] = {
     "profile": ("get_profile", Profile, "profile_snapshots"),
     "body_measurement": ("get_body_measurement", BodyMeasurement, "body_measurements"),
 }
@@ -95,8 +96,8 @@ def _resolve_since(
     resource: str,
     *,
     full: bool,
-    override_since: Optional[str],
-) -> Optional[str]:
+    override_since: str | None,
+) -> str | None:
     """Pick the ``start`` query param for this resource's list call."""
     if full:
         return EARLIEST_DATE
@@ -118,8 +119,8 @@ async def _sync_list_resource(
     *,
     store: WhoopStore,
     client: WhoopClient,
-    since: Optional[str],
-) -> Dict[str, Any]:
+    since: str | None,
+) -> dict[str, Any]:
     """Fetch + upsert one list resource. Always returns a dict describing the outcome."""
     t0 = time.monotonic()
     method_name, model_cls, table = _LIST_RESOURCES[resource]
@@ -127,7 +128,7 @@ async def _sync_list_resource(
 
     try:
         raw_records = await getattr(client, method_name)(start=since)
-        pairs: List = []
+        pairs: list = []
         for raw in raw_records:
             try:
                 flat = model_cls.model_validate(raw).flatten()
@@ -207,7 +208,7 @@ async def _sync_snapshot_resource(
     *,
     store: WhoopStore,
     client: WhoopClient,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     t0 = time.monotonic()
     method_name, model_cls, table = _SNAPSHOT_RESOURCES[resource]
     run_id = store.start_sync_run(resource)
@@ -215,9 +216,7 @@ async def _sync_snapshot_resource(
         raw = await getattr(client, method_name)()
         flat = model_cls.model_validate(raw).flatten()
         changed = store.upsert_snapshot(table, raw, flat)
-        store.finish_sync_run(
-            run_id, status="success", records_fetched=1, records_upserted=changed
-        )
+        store.finish_sync_run(run_id, status="success", records_fetched=1, records_upserted=changed)
         dur_ms = int((time.monotonic() - t0) * 1000)
         _log(
             "sync_resource_done",
@@ -235,9 +234,7 @@ async def _sync_snapshot_resource(
         }
     except WhoopAPIError as e:
         dur_ms = int((time.monotonic() - t0) * 1000)
-        store.finish_sync_run(
-            run_id, status="error", error_message=f"{e.code}: {e.message}"
-        )
+        store.finish_sync_run(run_id, status="error", error_message=f"{e.code}: {e.message}")
         _log(
             "sync_resource_done",
             resource=resource,
@@ -276,9 +273,9 @@ async def run_sync(
     store: WhoopStore,
     client: WhoopClient,
     full: bool = False,
-    since: Optional[str] = None,
-    resources: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    since: str | None = None,
+    resources: list[str] | None = None,
+) -> dict[str, Any]:
     """Run a sync pass, populate the store, and return a per-resource summary.
 
     Args:
@@ -312,14 +309,12 @@ async def run_sync(
             return name, await _sync_list_resource(
                 name, store=store, client=client, since=since_for
             )
-        return name, await _sync_snapshot_resource(
-            name, store=store, client=client
-        )
+        return name, await _sync_snapshot_resource(name, store=store, client=client)
 
     results = await asyncio.gather(*[_one(n) for n in targets])
 
-    per_resource: Dict[str, Any] = {}
-    warnings: List[str] = []
+    per_resource: dict[str, Any] = {}
+    warnings: list[str] = []
     ok = 0
     for name, res in results:
         per_resource[name] = res
@@ -343,7 +338,7 @@ async def run_sync(
         backfilled = store.backfill_recovery_windows()
         if backfilled:
             _log("recovery_windows_backfilled", rows_updated=backfilled)
-    except Exception as exc:  # noqa: BLE001 — backfill is best-effort
+    except Exception as exc:
         logger.warning("backfill_recovery_windows failed: %s", exc)
 
     completed_at = _utcnow_iso()
@@ -356,7 +351,7 @@ async def run_sync(
         completed_at=completed_at,
     )
 
-    response: Dict[str, Any] = {
+    response: dict[str, Any] = {
         "status": status,
         "started_at": started_at,
         "completed_at": completed_at,

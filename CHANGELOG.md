@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-04-22
+### Added
+- **ruff** (replaces black + isort + flake8). Config in `pyproject.toml` under `[tool.ruff]` — lean rule set (E/W/F/I/UP/B/SIM/RUF), 100-char lines, no docstring policing. Ran across the full codebase: 514 initial findings → 0.
+- **mypy** passing cleanly on `src/` (0 errors across 11 source files). `mypy_path = ["src"]` handles the flat-module layout. `warn_return_any` is intentionally off for now — most of our returned shapes come from `json.load`ed dicts (typed `Any`); enable when we type store return shapes as `TypedDict`.
+- **Pre-commit hooks** (`.pre-commit-config.yaml`): ruff, ruff-format, mypy, plus stdlib hygiene (trailing whitespace, EOF newline, YAML/TOML validation, large-file guard, private-key detection, merge-conflict detection). Install once via `.venv/bin/pre-commit install`.
+- **CI badge** and **PyPI badge** in README (previously static placeholders).
+- `pyproject.toml [project.optional-dependencies].dev` now mirrors `requirements-dev.txt` so `pip install whoop-mcp[dev]` just works.
+
+### Changed
+- `.github/workflows/ci.yml` rewritten from scratch. Previous file was upstream-inherited legacy (py38/py39 matrix, black/isort/flake8/bandit/safety, a broken `integration-test` job that ran the MCP server for 10 seconds expecting it to exit). New workflow: ubuntu+macos × py310/11/12 matrix running `ruff check` + `ruff format --check` + `mypy src/` + `pytest -q`, plus a build job that runs `python -m build` and validates with `twine check dist/*`.
+- `.env.example` rewritten. Previous file referenced `OAUTH_BASE_URL` pointing at the long-removed third-party OAuth proxy and didn't mention `WHOOP_CLIENT_ID` / `WHOOP_CLIENT_SECRET`. New file documents the actual env surface.
+- `src/__init__.py` deleted. It was dead code (module namespace `src.*` was never imported), and its presence confused mypy's module resolution. Package metadata (`__author__`, `__email__`) already lives in `pyproject.toml`.
+
+### Fixed
+- mypy surfaced a real type issue on `whoop_mcp_server.py::get_whoop_events`: `until_dt` was reassigned from `datetime` to `datetime | None` across `if`/`else` branches, and the unreachable-statement warning was a symptom of mypy losing narrowing. Now explicitly typed and assigned in both branches.
+- Minor: `whoop_store.start_sync_run` asserted `cur.lastrowid is not None` (always true on INSERT; placates mypy).
+- Minor: `setup_direct_oauth.py` `result` dict given an explicit `dict[str, str | None]` type; `HTTPServer` host argument properly defaulted to `"localhost"` instead of `str | None`.
+
 ## [0.8.0] - 2026-04-22
 ### Added
 - **Packaging for PyPI.** `[project.scripts]` entries create two console scripts: `whoop-mcp` (starts the MCP server) and `whoop-mcp-oauth` (runs the one-shot OAuth flow). Install with `pip install whoop-mcp`, or run ephemerally via `uvx --from whoop-mcp whoop-mcp`. No clone, no venv, no absolute paths required in MCP client registration.

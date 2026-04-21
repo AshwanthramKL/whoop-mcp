@@ -26,6 +26,7 @@ VALIDATION_ERROR, CACHE_ERROR, SYNC_ERROR.
 SECURITY: ``whoop.db`` contains your raw fitness data; treat it as
 sensitive as ``tokens.json``. The file is created with ``chmod 600``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,17 +34,15 @@ import base64
 import json
 import logging
 import os
-import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+import whoop_export
+import whoop_logging
 from whoop_client import (
     AuthError,
-    NotFoundError,
-    RateLimitError,
-    UpstreamError,
     ValidationError,
     WhoopAPIError,
     WhoopClient,
@@ -55,18 +54,16 @@ from whoop_models import (
     Recovery,
     Sleep,
     Workout,
-    flatten_list,
+    _Base,
 )
-from whoop_store import WhoopStore, SCHEMA_VERSION, RECORD_TABLES, SNAPSHOT_TABLES
+from whoop_store import RECORD_TABLES, SCHEMA_VERSION, SNAPSHOT_TABLES, WhoopStore
 from whoop_sync import run_sync as _run_sync
-import whoop_export
-import whoop_logging
 
 try:
     # Single source of truth: package version.
     from __version__ import __version__ as SERVER_VERSION  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - defensive fallback for odd sys.paths
-    SERVER_VERSION = "0.8.0"
+    SERVER_VERSION = "0.8.1"
 
 # M6: configure structured JSON logging + rotating file handler once at
 # import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
@@ -91,17 +88,15 @@ mcp = FastMCP(
 
 # ---------- Singletons (patched in tests) ----------
 
-_whoop_client: Optional[WhoopClient] = None
-_store: Optional[WhoopStore] = None
+_whoop_client: WhoopClient | None = None
+_store: WhoopStore | None = None
 
 
 def _default_db_path() -> str:
     env = os.getenv("WHOOP_DB_PATH")
     if env:
         return env
-    return os.path.join(
-        os.path.expanduser("~"), ".whoop-mcp-server", "whoop.db"
-    )
+    return os.path.join(os.path.expanduser("~"), ".whoop-mcp-server", "whoop.db")
 
 
 def _get_client() -> WhoopClient:
@@ -127,11 +122,11 @@ def _get_store() -> WhoopStore:
 # ---------- Error envelope ----------
 
 
-def _error_payload(code: str, message: str, endpoint: str) -> Dict[str, Any]:
+def _error_payload(code: str, message: str, endpoint: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "endpoint": endpoint}}
 
 
-def _map_error(exc: BaseException, endpoint: str) -> Dict[str, Any]:
+def _map_error(exc: BaseException, endpoint: str) -> dict[str, Any]:
     if isinstance(exc, WhoopAPIError):
         return _error_payload(exc.code, exc.message, exc.endpoint or endpoint)
     return _error_payload("UPSTREAM_ERROR", str(exc), endpoint)
@@ -144,14 +139,14 @@ async def _cache_first_list(
     *,
     resource: str,
     table: str,
-    start: Optional[str],
-    end: Optional[str],
-    limit: Optional[int],
+    start: str | None,
+    end: str | None,
+    limit: int | None,
     fresh: bool,
     endpoint: str,
     client_method: str,
-    model_cls: type,
-) -> Dict[str, Any]:
+    model_cls: type[_Base],
+) -> dict[str, Any]:
     """Shared read path for list tools.
 
     - ``fresh=True``: hit the API, upsert into cache, return from the API
@@ -169,9 +164,7 @@ async def _cache_first_list(
 
     if fresh:
         try:
-            raw_records = await getattr(client, client_method)(
-                start=start, end=end, limit=limit
-            )
+            raw_records = await getattr(client, client_method)(start=start, end=end, limit=limit)
         except Exception as e:
             return _map_error(e, endpoint)
         try:
@@ -196,13 +189,9 @@ async def _cache_first_list(
         return {"records": rows}
 
     # Empty window -> targeted sync, then re-read.
-    logger.info(
-        "cache miss for %s window [%s, %s); auto-syncing", resource, start, end
-    )
+    logger.info("cache miss for %s window [%s, %s); auto-syncing", resource, start, end)
     try:
-        raw_records = await getattr(client, client_method)(
-            start=start, end=end, limit=limit
-        )
+        raw_records = await getattr(client, client_method)(start=start, end=end, limit=limit)
     except Exception as e:
         return _map_error(e, endpoint)
     try:
@@ -224,7 +213,7 @@ async def _cache_first_list(
 
 
 @mcp.tool()
-def get_whoop_auth_status() -> Dict[str, Any]:
+def get_whoop_auth_status() -> dict[str, Any]:
     """Report WHOOP OAuth token status. Call this first if other WHOOP tools
     return AUTH_FAILED, to check whether the user needs to re-authorize.
     """
@@ -237,9 +226,9 @@ def get_whoop_auth_status() -> Dict[str, Any]:
 @mcp.tool()
 async def sync_whoop(
     full: bool = False,
-    since: Optional[str] = None,
-    resources: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    since: str | None = None,
+    resources: list[str] | None = None,
+) -> dict[str, Any]:
     """Refresh the local WHOOP cache.
 
     Call this once per session (or when you know new WHOOP data exists)
@@ -282,7 +271,7 @@ async def sync_whoop(
 
 
 @mcp.tool()
-async def get_whoop_profile(fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_profile(fresh: bool = False) -> dict[str, Any]:
     """Fetch the authenticated user's WHOOP profile (name, email).
 
     By default reads the latest cached snapshot. Pass ``fresh=True`` to
@@ -312,7 +301,7 @@ async def get_whoop_profile(fresh: bool = False) -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def get_whoop_body_measurement(fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_body_measurement(fresh: bool = False) -> dict[str, Any]:
     """Fetch the user's latest body measurements (height, weight, max HR).
 
     Reads from the cache by default; ``fresh=True`` forces an API call.
@@ -342,11 +331,11 @@ async def get_whoop_body_measurement(fresh: bool = False) -> Dict[str, Any]:
 
 @mcp.tool()
 async def list_whoop_cycles(
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    limit: Optional[int] = None,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int | None = None,
     fresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List WHOOP physiological cycles in a time window.
 
     Cache-first. Pass ``fresh=True`` to bypass the cache.
@@ -373,7 +362,7 @@ async def list_whoop_cycles(
 
 
 @mcp.tool()
-async def get_whoop_cycle(cycle_id: int, fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_cycle(cycle_id: int, fresh: bool = False) -> dict[str, Any]:
     """Fetch a single WHOOP cycle by numeric ID. Cache-first."""
     endpoint = f"/cycle/{cycle_id}"
     try:
@@ -398,7 +387,7 @@ async def get_whoop_cycle(cycle_id: int, fresh: bool = False) -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def get_whoop_cycle_sleep(cycle_id: int, fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_cycle_sleep(cycle_id: int, fresh: bool = False) -> dict[str, Any]:
     """Fetch the sleep record associated with a given cycle. Cache-first."""
     endpoint = f"/cycle/{cycle_id}/sleep"
     try:
@@ -425,7 +414,7 @@ async def get_whoop_cycle_sleep(cycle_id: int, fresh: bool = False) -> Dict[str,
 
 
 @mcp.tool()
-async def get_whoop_cycle_recovery(cycle_id: int, fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_cycle_recovery(cycle_id: int, fresh: bool = False) -> dict[str, Any]:
     """Fetch the recovery record associated with a given cycle. Cache-first."""
     endpoint = f"/cycle/{cycle_id}/recovery"
     try:
@@ -451,11 +440,11 @@ async def get_whoop_cycle_recovery(cycle_id: int, fresh: bool = False) -> Dict[s
 
 @mcp.tool()
 async def list_whoop_recoveries(
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    limit: Optional[int] = None,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int | None = None,
     fresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List WHOOP recovery records in a time window. Cache-first.
 
     Note: the WHOOP recovery endpoint does not expose ``start`` directly
@@ -478,11 +467,11 @@ async def list_whoop_recoveries(
 
 @mcp.tool()
 async def list_whoop_sleeps(
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    limit: Optional[int] = None,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int | None = None,
     fresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List WHOOP sleep activities (including naps) in a time window. Cache-first."""
     return await _cache_first_list(
         resource="sleeps",
@@ -498,7 +487,7 @@ async def list_whoop_sleeps(
 
 
 @mcp.tool()
-async def get_whoop_sleep(sleep_id: str, fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_sleep(sleep_id: str, fresh: bool = False) -> dict[str, Any]:
     """Fetch a single sleep activity by UUID. Cache-first."""
     endpoint = f"/activity/sleep/{sleep_id}"
     try:
@@ -524,11 +513,11 @@ async def get_whoop_sleep(sleep_id: str, fresh: bool = False) -> Dict[str, Any]:
 
 @mcp.tool()
 async def list_whoop_workouts(
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    limit: Optional[int] = None,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int | None = None,
     fresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List WHOOP workouts in a time window. Cache-first."""
     return await _cache_first_list(
         resource="workouts",
@@ -544,7 +533,7 @@ async def list_whoop_workouts(
 
 
 @mcp.tool()
-async def get_whoop_workout(workout_id: str, fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_workout(workout_id: str, fresh: bool = False) -> dict[str, Any]:
     """Fetch a single workout by UUID. Cache-first."""
     endpoint = f"/activity/workout/{workout_id}"
     try:
@@ -585,21 +574,18 @@ def _iso_z(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def _day_of_utc(ts: Optional[str]) -> Optional[str]:
+def _day_of_utc(ts: str | None) -> str | None:
     if not ts:
         return None
     try:
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    else:
-        dt = dt.astimezone(timezone.utc)
+    dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%d")
 
 
-async def _fetch_or_none(coro, warnings: List[str], label: str) -> Any:
+async def _fetch_or_none(coro, warnings: list[str], label: str) -> Any:
     try:
         return await coro
     except WhoopAPIError as e:
@@ -611,7 +597,7 @@ async def _fetch_or_none(coro, warnings: List[str], label: str) -> Any:
 
 
 @mcp.tool()
-async def get_whoop_daily_summary(date: str, fresh: bool = False) -> Dict[str, Any]:
+async def get_whoop_daily_summary(date: str, fresh: bool = False) -> dict[str, Any]:
     """Gather a single day's WHOOP data into one flat record.
 
     Assembles cycle, morning recovery, primary (longest non-nap) sleep,
@@ -623,7 +609,7 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> Dict[str, A
         fresh: propagated to each underlying fetch.
     """
     endpoint = "/daily_summary"
-    warnings: List[str] = []
+    warnings: list[str] = []
 
     try:
         start_dt = _parse_iso_date(date)
@@ -661,7 +647,8 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> Dict[str, A
                 # query_range returns flat rows; daily_summary downstream
                 # works off raw_cycles via Pydantic. For the cache path
                 # we already have flat rows so we short-circuit below.
-                r for r in store.query_range("cycles", start=start_iso, end=end_iso)
+                r
+                for r in store.query_range("cycles", start=start_iso, end=end_iso)
             ]
             # If cache is empty, delegate to the fresh path instead.
             if not raw_cycles:
@@ -702,7 +689,7 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> Dict[str, A
             "recovery": recovery_flat["score_state"] if recovery_flat else None,
             "sleep": sleep_flat["score_state"] if sleep_flat else None,
         }
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "date": date,
             "cycle": cycle_flat,
             "recovery": recovery_flat,
@@ -740,9 +727,7 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> Dict[str, A
 
     sleep_flat = None
     if raw_sleeps and cycle_id is not None:
-        candidates = [
-            s for s in raw_sleeps if s.get("cycle_id") == cycle_id and not s.get("nap")
-        ]
+        candidates = [s for s in raw_sleeps if s.get("cycle_id") == cycle_id and not s.get("nap")]
         if candidates:
             flats = [Sleep.model_validate(s).flatten() for s in candidates]
             flats.sort(key=lambda f: f.get("in_bed_seconds") or 0, reverse=True)
@@ -785,7 +770,7 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> Dict[str, A
 _DATE_RE = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def _validate_iso_date(s: str) -> Optional[str]:
+def _validate_iso_date(s: str) -> str | None:
     if not _DATE_RE.match(s):
         return None
     try:
@@ -803,9 +788,7 @@ def _records_resource(table: str, start: str, end: str) -> str:
     s = _validate_iso_date(start)
     e = _validate_iso_date(end)
     if s is None or e is None:
-        return _resource_error(
-            "VALIDATION_ERROR", "start/end must be YYYY-MM-DD"
-        )
+        return _resource_error("VALIDATION_ERROR", "start/end must be YYYY-MM-DD")
     try:
         rows = _get_store().query_range(table, start=s, end=e)
     except Exception as exc:
@@ -915,7 +898,7 @@ _EVENT_RESOURCES = (
 _EVENT_LIMIT_MAX = 5000
 
 
-def _parse_iso_ts(s: str) -> Optional[datetime]:
+def _parse_iso_ts(s: str) -> datetime | None:
     """Best-effort ISO-8601 parse -> aware UTC datetime. ``None`` on failure."""
     if not isinstance(s, str) or not s:
         return None
@@ -941,11 +924,11 @@ _CURSOR_SEP = "|"
 
 
 def _encode_events_cursor(updated_at: str, resource: str, id_: str) -> str:
-    raw = f"{updated_at}{_CURSOR_SEP}{resource}{_CURSOR_SEP}{id_}".encode("utf-8")
+    raw = f"{updated_at}{_CURSOR_SEP}{resource}{_CURSOR_SEP}{id_}".encode()
     return base64.urlsafe_b64encode(raw).decode("ascii")
 
 
-def _decode_events_cursor(s: str) -> Optional[Tuple[str, str, str]]:
+def _decode_events_cursor(s: str) -> tuple[str, str, str] | None:
     """Return ``(updated_at, resource, id)`` or ``None`` if ``s`` is not a cursor.
 
     "Not a cursor" includes: not base64, decoded string doesn't contain
@@ -976,10 +959,10 @@ def _decode_events_cursor(s: str) -> Optional[Tuple[str, str, str]]:
 def _events_core(
     *,
     since: str,
-    until: Optional[str],
-    resources: Optional[List[str]],
+    until: str | None,
+    resources: list[str] | None,
     limit: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Shared implementation for the events tool and resource.
 
     Validates args, queries the store via ``iter_events``, applies limit +
@@ -1008,17 +991,19 @@ def _events_core(
         )
 
     # Validate / default until.
+    until_dt: datetime
     if until is None or until == "":
         until_dt = datetime.now(timezone.utc)
         until = until_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     else:
-        until_dt = _parse_iso_ts(until)
-        if until_dt is None:
+        parsed_until = _parse_iso_ts(until)
+        if parsed_until is None:
             return _error_payload(
                 "VALIDATION_ERROR",
                 "'until' must be an ISO-8601 timestamp",
                 endpoint,
             )
+        until_dt = parsed_until
 
     if until_dt <= since_dt:
         return _error_payload(
@@ -1110,10 +1095,10 @@ def _events_core(
 @mcp.tool()
 async def get_whoop_events(
     since: str,
-    until: Optional[str] = None,
-    resources: Optional[List[str]] = None,
+    until: str | None = None,
+    resources: list[str] | None = None,
     limit: int = 500,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Returns WHOOP records that changed since a given timestamp, across
     all cached resources.
 
@@ -1156,9 +1141,7 @@ async def get_whoop_events(
     On validation failure or cache error, returns the standard
     ``{"error": {...}}`` envelope. Tool never raises.
     """
-    return _events_core(
-        since=since, until=until, resources=resources, limit=limit
-    )
+    return _events_core(since=since, until=until, resources=resources, limit=limit)
 
 
 # ---------- Events feed resources (M5) ----------
@@ -1178,9 +1161,7 @@ async def get_whoop_events(
     ),
 )
 def resource_events_since(since: str) -> str:
-    payload = _events_core(
-        since=since, until=None, resources=None, limit=500
-    )
+    payload = _events_core(since=since, until=None, resources=None, limit=500)
     return json.dumps(payload, default=str)
 
 
@@ -1193,9 +1174,7 @@ def resource_events_since(since: str) -> str:
     ),
 )
 def resource_events_window(since: str, until: str) -> str:
-    payload = _events_core(
-        since=since, until=until, resources=None, limit=500
-    )
+    payload = _events_core(since=since, until=until, resources=None, limit=500)
     return json.dumps(payload, default=str)
 
 
@@ -1207,10 +1186,10 @@ async def export_whoop(
     kind: str,
     format: str,
     path: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    start: str | None = None,
+    end: str | None = None,
     overwrite: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Export cached WHOOP records to disk.
 
     Requires ``sync_whoop()`` to have been run first — exports read from
@@ -1271,8 +1250,8 @@ async def export_whoop(
 # ---------- Health check (M6) ----------
 
 
-def _component(status: str, detail: str, **extra: Any) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"status": status, "detail": detail}
+def _component(status: str, detail: str, **extra: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {"status": status, "detail": detail}
     out.update(extra)
     return out
 
@@ -1282,8 +1261,9 @@ def _rank(status: str) -> int:
     return {"ok": 0, "skipped": 0, "warn": 1, "fail": 2}.get(status, 2)
 
 
-async def _check_auth() -> Dict[str, Any]:
+async def _check_auth() -> dict[str, Any]:
     import time as _time
+
     t0 = _time.perf_counter()
     try:
         info = _get_client().get_auth_status()
@@ -1312,17 +1292,18 @@ async def _check_auth() -> Dict[str, Any]:
     return _component("warn", f"unknown auth status: {status_str!r}", latency_ms=latency_ms)
 
 
-async def _check_api(live: bool) -> Dict[str, Any]:
+async def _check_api(live: bool) -> dict[str, Any]:
     if not live:
         return _component("skipped", "live=False; skipped network call")
     import time as _time
+
     import httpx as _httpx
 
     t0 = _time.perf_counter()
     try:
         client = _get_client()
         # Short timeout: the goal is liveness, not data.
-        resp = await asyncio.wait_for(client.get_profile(), timeout=5.0)
+        await asyncio.wait_for(client.get_profile(), timeout=5.0)
     except asyncio.TimeoutError:
         latency_ms = int((_time.perf_counter() - t0) * 1000)
         return _component("fail", "timeout after 5s", latency_ms=latency_ms)
@@ -1342,7 +1323,7 @@ async def _check_api(live: bool) -> Dict[str, Any]:
     return _component("ok", "reachable", latency_ms=latency_ms)
 
 
-def _check_cache_readable() -> Dict[str, Any]:
+def _check_cache_readable() -> dict[str, Any]:
     try:
         store = _get_store()
     except Exception as e:
@@ -1353,10 +1334,12 @@ def _check_cache_readable() -> Dict[str, Any]:
             total += store.count(table)
     except Exception as e:
         return _component("fail", f"count failed: {type(e).__name__}", rows_total=0)
-    return _component("ok", f"cache has {total} rows across record + snapshot tables", rows_total=total)
+    return _component(
+        "ok", f"cache has {total} rows across record + snapshot tables", rows_total=total
+    )
 
 
-def _check_cache_writable() -> Dict[str, Any]:
+def _check_cache_writable() -> dict[str, Any]:
     try:
         store = _get_store()
         conn = store._connect()
@@ -1376,7 +1359,7 @@ def _check_cache_writable() -> Dict[str, Any]:
     return _component("ok", "sentinel write + delete succeeded")
 
 
-def _check_schema_version() -> Dict[str, Any]:
+def _check_schema_version() -> dict[str, Any]:
     try:
         store = _get_store()
         conn = store._connect()
@@ -1384,9 +1367,7 @@ def _check_schema_version() -> Dict[str, Any]:
     except Exception as e:
         return _component("fail", f"{type(e).__name__}")
     if actual == SCHEMA_VERSION:
-        return _component(
-            "ok", f"user_version={actual} expected={SCHEMA_VERSION}"
-        )
+        return _component("ok", f"user_version={actual} expected={SCHEMA_VERSION}")
     return _component(
         "warn",
         f"user_version={actual} expected={SCHEMA_VERSION}; migration may be needed",
@@ -1394,7 +1375,7 @@ def _check_schema_version() -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def health_check(live: bool = True) -> Dict[str, Any]:
+async def health_check(live: bool = True) -> dict[str, Any]:
     """Run server health checks and return a structured status dict.
 
     Run before long operations or when diagnosing issues; fast local-only
@@ -1417,7 +1398,7 @@ async def health_check(live: bool = True) -> Dict[str, Any]:
 
     Never raises. Never emits tokens or PII.
     """
-    checks: Dict[str, Dict[str, Any]] = {}
+    checks: dict[str, dict[str, Any]] = {}
     try:
         checks["auth"] = await _check_auth()
     except Exception as e:  # pragma: no cover

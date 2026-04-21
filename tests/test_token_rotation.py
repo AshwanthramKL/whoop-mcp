@@ -16,19 +16,14 @@ What we're locking in:
   becomes unreadable and we don't crash.
 - Concurrent refresh only issues one HTTP request (async lock).
 """
+
 from __future__ import annotations
 
-import json
 import os
-import tempfile
-import threading
 import time
-from datetime import datetime, timedelta
-from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # We are going to manipulate the real TokenManager, bypassing the
 # autouse conftest patch.
@@ -38,6 +33,7 @@ pytestmark = [pytest.mark.filterwarnings("ignore::DeprecationWarning")]
 def _mk_manager(tmp_dir: str):
     """Fresh TokenManager with paths in tmp_dir. Uses real crypto."""
     import auth_manager
+
     token_path = os.path.join(tmp_dir, "tokens.json")
     key_path = os.path.join(tmp_dir, ".encryption_key")
     with patch.multiple(
@@ -77,7 +73,7 @@ def test_refresh_success_stores_new_tokens(mock_post, tmp_path):
             "token_type": "Bearer",
         },
     )
-    tm, token_path, _ = _mk_manager(str(tmp_path))
+    tm, _token_path, _ = _mk_manager(str(tmp_path))
     out = tm.refresh_tokens("old_refresh")
     assert out is not None
     assert out["access_token"] == "NEW"
@@ -171,6 +167,7 @@ def test_missing_key_regeneration_treats_prior_tokens_as_unreadable(tmp_path):
     # A fresh manager regenerates a key; prior ciphertext cannot be
     # decrypted. load_tokens should return None (or at least not crash).
     import auth_manager
+
     with patch.multiple(
         "auth_manager",
         TOKEN_STORAGE_PATH=token_path,
@@ -196,9 +193,8 @@ async def test_concurrent_refresh_fires_only_one_http_request(tmp_path):
     Relies on M6 adding an async refresh lock in TokenManager.
     """
     import asyncio
-    import auth_manager
 
-    tm, token_path, _ = _mk_manager(str(tmp_path))
+    tm, _token_path, _ = _mk_manager(str(tmp_path))
     # Save an already-expired token.
     tm.save_tokens(
         {

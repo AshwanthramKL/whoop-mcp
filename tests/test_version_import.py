@@ -4,6 +4,7 @@
 version. `SERVER_VERSION` in `whoop_mcp_server.py` must be derived from
 it (not hard-coded), and `pyproject.toml` should match.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +17,7 @@ def test_server_version_matches_version_module():
     import __version__ as version_mod
     import whoop_mcp_server
 
-    assert whoop_mcp_server.SERVER_VERSION == version_mod.__version__
+    assert version_mod.__version__ == whoop_mcp_server.SERVER_VERSION
 
 
 def test_version_module_has_a_nonempty_string():

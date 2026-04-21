@@ -12,10 +12,10 @@ to commit.
 
 Run once, commit the tests/fixtures/ output, then never run again.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -56,7 +56,10 @@ def main() -> int:
     tm = TokenManager()
     token = tm.get_valid_access_token()
     if not token:
-        print("No valid access token available. Run `whoop-mcp-oauth` (pip/uvx) or `python src/setup_direct_oauth.py` (git clone).", file=sys.stderr)
+        print(
+            "No valid access token available. Run `whoop-mcp-oauth` (pip/uvx) or `python src/setup_direct_oauth.py` (git clone).",
+            file=sys.stderr,
+        )
         return 1
 
     FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,7 +114,9 @@ def main() -> int:
                         json.dumps(_redact(data), indent=2, sort_keys=True) + "\n"
                     )
                 except httpx.HTTPStatusError as e:
-                    print(f"  !! /cycle/{cycle_id}/{sub} -> {e.response.status_code}", file=sys.stderr)
+                    print(
+                        f"  !! /cycle/{cycle_id}/{sub} -> {e.response.status_code}", file=sys.stderr
+                    )
 
         sleeps = results.get("sleeps_page", {}).get("records", [])
         if sleeps:

@@ -1,30 +1,19 @@
-# Development dependencies for WHOOP MCP Server
+# Development dependencies for whoop-mcp.
+# Runtime deps live in requirements.txt; don't duplicate them here.
 
 # Testing
 pytest>=7.0.0
-pytest-cov>=4.0.0
 pytest-asyncio>=0.21.0
-pytest-mock>=3.10.0
-respx>=0.21.0  # httpx route mocking for M1 client tests
-freezegun>=1.2.0  # time freezing for M2 daily_summary tests
+respx>=0.21.0          # httpx route mocking
+freezegun>=1.2.0       # time freezing for daily_summary tests
 
-# Code quality
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
-mypy>=1.0.0
+# Lint, format, type-check
+ruff>=0.5.0            # replaces black + isort + flake8
+mypy>=1.10.0
 
-# Security
-bandit>=1.7.0
-safety>=2.3.0
-
-# Build and distribution
+# Build + release
 build>=0.10.0
 twine>=4.0.0
 
-# Documentation
-mkdocs>=1.4.0
-mkdocs-material>=9.0.0
-
-# Development utilities
-pre-commit>=3.0.0
+# Pre-commit hook runner
+pre-commit>=3.5.0

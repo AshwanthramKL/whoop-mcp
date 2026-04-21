@@ -8,6 +8,7 @@ The sync function:
  - upserts flattened records,
  - writes a sync_runs audit row per resource.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +19,6 @@ import pytest
 from whoop_client import UpstreamError
 from whoop_store import WhoopStore
 from whoop_sync import run_sync
-
 
 # ---------- fixtures ----------
 
@@ -39,7 +39,12 @@ def _cycle_record(cid: int, start: str, updated_at: str) -> dict:
         "updated_at": updated_at,
         "timezone_offset": "+00:00",
         "score_state": "SCORED",
-        "score": {"strain": 5.0, "kilojoule": 4000.0, "average_heart_rate": 65, "max_heart_rate": 130},
+        "score": {
+            "strain": 5.0,
+            "kilojoule": 4000.0,
+            "average_heart_rate": 65,
+            "max_heart_rate": 130,
+        },
     }
 
 
@@ -146,12 +151,14 @@ def mock_client() -> MagicMock:
 @pytest.mark.asyncio
 async def test_full_sync_populates_cache(store: WhoopStore, mock_client: MagicMock):
     cycles = [
-        _cycle_record(1001 + i, f"2026-04-{10+i:02d}T00:00:00Z", f"2026-04-{11+i:02d}T06:00:00Z")
+        _cycle_record(
+            1001 + i, f"2026-04-{10 + i:02d}T00:00:00Z", f"2026-04-{11 + i:02d}T06:00:00Z"
+        )
         for i in range(3)
     ]
     mock_client.list_cycles.return_value = cycles
     mock_client.list_recoveries.return_value = [
-        _recovery_record(1001 + i, f"2026-04-{11+i:02d}T06:00:00Z") for i in range(3)
+        _recovery_record(1001 + i, f"2026-04-{11 + i:02d}T06:00:00Z") for i in range(3)
     ]
 
     result = await run_sync(store=store, client=mock_client, full=True)
@@ -226,9 +233,7 @@ async def test_one_resource_fails_other_resources_succeed(
 
 
 @pytest.mark.asyncio
-async def test_all_resources_fail_status_is_error(
-    store: WhoopStore, mock_client: MagicMock
-):
+async def test_all_resources_fail_status_is_error(store: WhoopStore, mock_client: MagicMock):
     err = UpstreamError("UPSTREAM_ERROR", 503, "down", "/x")
     mock_client.list_cycles.side_effect = err
     mock_client.list_recoveries.side_effect = err
@@ -245,9 +250,7 @@ async def test_all_resources_fail_status_is_error(
 
 
 @pytest.mark.asyncio
-async def test_since_override_used_as_window_start(
-    store: WhoopStore, mock_client: MagicMock
-):
+async def test_since_override_used_as_window_start(store: WhoopStore, mock_client: MagicMock):
     await run_sync(
         store=store,
         client=mock_client,
@@ -260,9 +263,7 @@ async def test_since_override_used_as_window_start(
 
 
 @pytest.mark.asyncio
-async def test_resources_filter_only_syncs_selected(
-    store: WhoopStore, mock_client: MagicMock
-):
+async def test_resources_filter_only_syncs_selected(store: WhoopStore, mock_client: MagicMock):
     r = await run_sync(store=store, client=mock_client, resources=["cycles"])
     assert set(r["resources"].keys()) == {"cycles"}
     mock_client.list_recoveries.assert_not_called()

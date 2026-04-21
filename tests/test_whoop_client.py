@@ -4,11 +4,8 @@ Tests for the M1 rewrite of WhoopClient.
 Covers the v2 surface, auto-pagination, retry/backoff, and structured errors.
 Uses respx to stub httpx without any real network.
 """
-from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any
+from __future__ import annotations
 
 import httpx
 import pytest
@@ -212,6 +209,7 @@ async def test_429_retries_after_retry_after_header(monkeypatch, fixture_loader)
         sleep_calls.append(s)
 
     import whoop_client as wc
+
     monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
 
     payload = fixture_loader("profile")
@@ -241,6 +239,7 @@ async def test_429_twice_raises_rate_limit_error(monkeypatch):
         return None
 
     import whoop_client as wc
+
     monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
 
     respx.get(f"{V2}/user/profile/basic").mock(
@@ -261,6 +260,7 @@ async def test_5xx_exponential_backoff_then_success(monkeypatch, fixture_loader)
         sleeps.append(s)
 
     import whoop_client as wc
+
     monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
 
     payload = fixture_loader("profile")
@@ -292,6 +292,7 @@ async def test_5xx_exhausted_raises_upstream_error(monkeypatch):
         return None
 
     import whoop_client as wc
+
     monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
 
     respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(503, text="down"))

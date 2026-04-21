@@ -5,6 +5,7 @@ We patch the underlying WhoopClient to isolate the tool functions from HTTP,
 then verify (a) error wrapping, (b) tools never raise, (c) FastMCP schema
 generation shows the expected params for two representative tools.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -19,7 +20,6 @@ from whoop_client import (
     UpstreamError,
     ValidationError,
 )
-
 
 # ----- helpers -----
 
@@ -137,9 +137,7 @@ async def test_tool_auth_failed_error_mapping(stub_client):
 
 @pytest.mark.asyncio
 async def test_tool_rate_limited_error_mapping(stub_client):
-    stub_client.list_cycles.side_effect = RateLimitError(
-        "RATE_LIMITED", 429, "slow", "/cycle"
-    )
+    stub_client.list_cycles.side_effect = RateLimitError("RATE_LIMITED", 429, "slow", "/cycle")
     out = await server.list_whoop_cycles()
     assert out["error"]["code"] == "RATE_LIMITED"
 
