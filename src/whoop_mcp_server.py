@@ -155,14 +155,6 @@ def _map_error(exc: BaseException, endpoint: str) -> Dict[str, Any]:
 # ---------- M3 helpers: cache-first list/get ----------
 
 
-_LIST_TABLE_BY_RESOURCE = {
-    "cycles": "cycles",
-    "recoveries": "recoveries",
-    "sleeps": "sleeps",
-    "workouts": "workouts",
-}
-
-
 async def _cache_first_list(
     *,
     resource: str,
