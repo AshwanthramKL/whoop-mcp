@@ -1,17 +1,18 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ashwanthramkl/whoop-mcp",
-  "description": "Read-only WHOOP v2 API access for MCP clients — local SQLite cache, incremental sync, CSV/JSONL/Parquet exports, event feed, 17 tools, 9 MCP resources.",
+  "description": "Read-only WHOOP v2 data for MCP clients, with local SQLite cache and CSV/JSONL/Parquet exports.",
   "repository": {
     "url": "https://github.com/AshwanthramKL/whoop-mcp",
     "source": "github"
   },
-  "version": "0.8.0",
+  "version": "0.8.2",
   "packages": [
     {
       "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
       "identifier": "whoop-mcp",
-      "version": "0.8.0",
+      "version": "0.8.2",
       "transport": {
         "type": "stdio"
       },
