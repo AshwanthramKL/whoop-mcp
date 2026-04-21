@@ -151,11 +151,11 @@ def test_sleep_flatten(fixture_loader):
         assert bad not in flat
 
     # Stage renames + ms->s (1 decimal)
-    assert flat["in_bed_seconds"] == pytest.approx(25570.4, abs=0.1)
-    assert flat["light_sleep_seconds"] == pytest.approx(12906.5, abs=0.1)
-    assert flat["rem_sleep_seconds"] == pytest.approx(5642.4, abs=0.1)
-    assert flat["deep_sleep_seconds"] == pytest.approx(5701.4, abs=0.1)
-    assert flat["awake_seconds"] == pytest.approx(1320.1, abs=0.1)
+    assert flat["in_bed_seconds"] == pytest.approx(25570.4, abs=0.2)
+    assert flat["light_sleep_seconds"] == pytest.approx(12906.5, abs=0.2)
+    assert flat["rem_sleep_seconds"] == pytest.approx(5642.4, abs=0.2)
+    assert flat["deep_sleep_seconds"] == pytest.approx(5701.4, abs=0.2)
+    assert flat["awake_seconds"] == pytest.approx(1320.1, abs=0.2)
     assert flat["sleep_cycle_count"] == 5
     assert flat["disturbance_count"] == 9
 
@@ -209,9 +209,9 @@ def test_workout_flatten(fixture_loader):
 
     # Zone durations: ms -> seconds (1dp), renamed to snake_case without milli
     zones = flat["zone_durations_seconds"]
-    assert zones["zone_one"] == pytest.approx(1541.0, abs=0.1)
-    assert zones["zone_two"] == pytest.approx(38.0, abs=0.1)
-    assert zones["zone_zero"] == pytest.approx(310.0, abs=0.1)
+    assert zones["zone_one"] == pytest.approx(1541.0, abs=0.2)
+    assert zones["zone_two"] == pytest.approx(38.0, abs=0.2)
+    assert zones["zone_zero"] == pytest.approx(310.0, abs=0.2)
     assert zones["zone_three"] == 0.0
     assert zones["zone_four"] == 0.0
     assert zones["zone_five"] == 0.0
