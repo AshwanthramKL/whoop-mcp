@@ -266,7 +266,14 @@ async def test_events_limit_triggers_pagination(seeded_store: WhoopStore):
     assert r["status"] == "success"
     assert r["count"] == 3
     assert len(r["events"]) == 3
-    assert r["next_cursor"] == r["events"][-1]["updated_at"]
+    # M6: next_cursor is an opaque string (base64 of ts|resource|id) — it
+    # is NOT the plain updated_at anymore. It must be a non-empty string.
+    assert isinstance(r["next_cursor"], str)
+    assert r["next_cursor"]
+    # Last event's updated_at must be encoded inside the cursor.
+    import base64 as _b64
+    decoded = _b64.urlsafe_b64decode(r["next_cursor"] + "==").decode("utf-8")
+    assert r["events"][-1]["updated_at"] in decoded
 
 
 async def test_events_no_truncation_means_null_cursor(seeded_store: WhoopStore):

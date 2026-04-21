@@ -29,12 +29,13 @@ sensitive as ``tokens.json``. The file is created with ``chmod 600``.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.server.fastmcp import FastMCP
 
@@ -939,6 +940,51 @@ def _parse_iso_ts(s: str) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+# ---------- composite events cursor ----------
+#
+# Cursor encodes the last-returned event as urlsafe-base64 of the literal
+# string ``<updated_at>|<resource>|<id>``. Opaque to callers; cheap to
+# round-trip. A malformed cursor is rejected at tool-boundary as
+# VALIDATION_ERROR. Plain ISO-8601 ``since`` values still work for
+# back-compat: the encoder only produces cursors; the decoder treats
+# anything that fails base64 + split as "not a cursor".
+
+_CURSOR_SEP = "|"
+
+
+def _encode_events_cursor(updated_at: str, resource: str, id_: str) -> str:
+    raw = f"{updated_at}{_CURSOR_SEP}{resource}{_CURSOR_SEP}{id_}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_events_cursor(s: str) -> Optional[Tuple[str, str, str]]:
+    """Return ``(updated_at, resource, id)`` or ``None`` if ``s`` is not a cursor.
+
+    "Not a cursor" includes: not base64, decoded string doesn't contain
+    two separators, or decoded updated_at doesn't parse as ISO-8601.
+    """
+    if not isinstance(s, str) or not s:
+        return None
+    # Heuristic: a valid ISO string contains ``:`` which urlsafe-base64
+    # does not. If it starts with a digit and has a ``-`` / ``:`` pattern,
+    # treat as ISO and don't try base64.
+    if ":" in s or s.endswith("Z"):
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(s.encode("ascii") + b"==").decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    parts = decoded.split(_CURSOR_SEP)
+    if len(parts) != 3:
+        return None
+    updated_at, resource, id_ = parts
+    if _parse_iso_ts(updated_at) is None:
+        return None
+    if not resource or not id_:
+        return None
+    return updated_at, resource, id_
+
+
 def _events_core(
     *,
     since: str,
@@ -954,12 +1000,22 @@ def _events_core(
     """
     endpoint = "get_whoop_events"
 
-    # Validate since.
-    since_dt = _parse_iso_ts(since) if since else None
+    # Validate since. Accepts either:
+    #  - plain ISO-8601 timestamp (back-compat, strict >)
+    #  - opaque cursor from a previous next_cursor (composite tiebreaker)
+    since_cursor = _decode_events_cursor(since) if since else None
+    if since_cursor is not None:
+        since_for_sql = since_cursor[0]
+        since_dt = _parse_iso_ts(since_for_sql)
+    else:
+        since_dt = _parse_iso_ts(since) if since else None
+        since_for_sql = since
+
     if since_dt is None:
+        # Empty / garbage / anything else.
         return _error_payload(
             "VALIDATION_ERROR",
-            "'since' must be a non-empty ISO-8601 timestamp",
+            "'since' must be a non-empty ISO-8601 timestamp or opaque events cursor",
             endpoint,
         )
 
@@ -1026,9 +1082,10 @@ def _events_core(
         rows = list(
             store.iter_events(
                 resources=resource_list,
-                since=since,
+                since=since_for_sql,
                 until=until,
                 limit=limit_i,
+                since_cursor=since_cursor,
             )
         )
     except Exception as e:
@@ -1036,11 +1093,18 @@ def _events_core(
         return _error_payload("CACHE_ERROR", f"{type(e).__name__}: {e}", endpoint)
 
     # Truncation: iter_events returns up to limit+1 rows. If we got the
-    # extra row, trim to limit and set next_cursor to the updated_at of
-    # the last kept event.
+    # extra row, trim to limit and set next_cursor to the composite cursor
+    # of the last kept event (so a later call with since=cursor continues
+    # correctly across ties).
     if len(rows) > limit_i:
         events = rows[:limit_i]
-        next_cursor = events[-1]["updated_at"] if events else None
+        if events:
+            last = events[-1]
+            next_cursor = _encode_events_cursor(
+                str(last["updated_at"]), str(last["resource"]), str(last["id"])
+            )
+        else:
+            next_cursor = None
     else:
         events = rows
         next_cursor = None
@@ -1092,10 +1156,17 @@ async def get_whoop_events(
                      "updated_at": "...", "record": {...}}, ...],
          "next_cursor": null | "<iso>"}
 
-    If more events exist than ``limit``, ``next_cursor`` is the
-    ``updated_at`` of the last returned event; pass it as ``since`` on the
-    next call to continue. On validation failure or cache error, returns
-    the standard ``{"error": {...}}`` envelope. Tool never raises.
+    If more events exist than ``limit``, ``next_cursor`` is an **opaque
+    composite cursor** encoded as urlsafe base64 of
+    ``<updated_at>|<resource>|<id>`` — the triple of the last returned
+    event. Pass it as ``since`` on the next call to continue; the feed
+    uses it as a tiebroken lower bound so no two events with the same
+    ``updated_at`` are skipped at a pagination boundary.
+
+    Back-compat: ``since`` still accepts a plain ISO-8601 string (strict
+    ``>`` lower bound). Garbage strings are rejected as VALIDATION_ERROR.
+    On validation failure or cache error, returns the standard
+    ``{"error": {...}}`` envelope. Tool never raises.
     """
     return _events_core(
         since=since, until=until, resources=resources, limit=limit

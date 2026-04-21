@@ -419,6 +419,8 @@ class WhoopStore:
         since: str,
         until: str,
         limit: int,
+        *,
+        since_cursor: Optional[Tuple[str, str, str]] = None,
     ) -> Iterator[Dict[str, Any]]:
         """Yield ``{resource, id, updated_at, record}`` dicts across resources.
 
@@ -473,18 +475,43 @@ class WhoopStore:
             return
 
         # Build a UNION ALL query so SQLite does the sort + limit for us.
+        # When a composite cursor is present, the lower bound on each
+        # branch becomes:
+        #     (updated_at > cursor.ts)
+        #   OR (updated_at = cursor.ts AND resource > cursor.resource)
+        #   OR (updated_at = cursor.ts AND resource = cursor.resource
+        #       AND id > cursor.id)
+        # When absent, fall back to the plain strict lower bound
+        # ``updated_at > since`` so ISO-string callers stay back-compat.
         parts: List[str] = []
         params: List[Any] = []
         for table, pub in tables:
-            parts.append(
-                f"SELECT ? AS resource, id AS id, updated_at AS updated_at, "
-                f"flat_json AS flat_json FROM {table} "
-                f"WHERE updated_at > ? AND updated_at < ?"
-            )
-            params.extend([pub, since, until])
+            if since_cursor is not None:
+                cts, cres, cid = since_cursor
+                parts.append(
+                    f"SELECT ? AS resource, id AS id, updated_at AS updated_at, "
+                    f"flat_json AS flat_json FROM {table} "
+                    f"WHERE updated_at < ? AND ("
+                    f"updated_at > ? "
+                    f"OR (updated_at = ? AND ? > ?) "
+                    f"OR (updated_at = ? AND ? = ? AND id > ?))"
+                )
+                # Param order matches the placeholders above:
+                # resource, until, cursor.ts, cursor.ts, pub, cursor.res,
+                # cursor.ts, pub, cursor.res, cursor.id
+                params.extend(
+                    [pub, until, cts, cts, pub, cres, cts, pub, cres, cid]
+                )
+            else:
+                parts.append(
+                    f"SELECT ? AS resource, id AS id, updated_at AS updated_at, "
+                    f"flat_json AS flat_json FROM {table} "
+                    f"WHERE updated_at > ? AND updated_at < ?"
+                )
+                params.extend([pub, since, until])
         sql = (
             " UNION ALL ".join(parts)
-            + " ORDER BY updated_at ASC, resource ASC LIMIT ?"
+            + " ORDER BY updated_at ASC, resource ASC, id ASC LIMIT ?"
         )
         params.append(int(limit) + 1)
 
