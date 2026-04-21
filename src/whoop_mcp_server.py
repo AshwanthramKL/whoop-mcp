@@ -57,18 +57,21 @@ from whoop_models import (
     Workout,
     flatten_list,
 )
-from whoop_store import WhoopStore
+from whoop_store import WhoopStore, SCHEMA_VERSION, RECORD_TABLES, SNAPSHOT_TABLES
 from whoop_sync import run_sync as _run_sync
 import whoop_export
+import whoop_logging
 
-SERVER_VERSION = "0.6.0"
+SERVER_VERSION = "0.7.0"
 
+# M6: configure structured JSON logging + rotating file handler once at
+# import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
+try:
+    whoop_logging.setup()
+except Exception:
+    # Never let logging setup break module import.
+    pass
 logger = logging.getLogger("whoop_mcp_server")
-if not logger.handlers:
-    _h = logging.StreamHandler(sys.stderr)
-    _h.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    logger.addHandler(_h)
-    logger.setLevel(logging.INFO)
 
 mcp = FastMCP(
     "whoop",
@@ -86,9 +89,13 @@ mcp = FastMCP(
         "records to CSV / JSONL / Parquet on disk (requires a prior "
         "``sync_whoop`` run). Call ``get_whoop_events(since=...)`` for a "
         "chronological 'what's new' feed across all cached resources — "
-        "useful for activity feeds and incremental reads. The feed is "
-        "also available as an MCP resource under "
-        "whoop://db/events/{since}[/{until}]."
+        "useful for activity feeds and incremental reads. The feed "
+        "returns an opaque composite cursor in ``next_cursor`` — pass "
+        "it back as ``since`` to paginate without skipping ties. Call "
+        "``health_check`` before long operations or when diagnosing "
+        "issues; a fast local-only mode is available via ``live=False``. "
+        "Logs are structured JSON on stderr plus a rotating file at "
+        "~/.whoop-mcp-server/logs/whoop-mcp.log."
     ),
 )
 
@@ -1278,6 +1285,205 @@ async def export_whoop(
     except Exception as e:
         logger.exception("export_whoop tool failed")
         return _error_payload("EXPORT_ERROR", f"{type(e).__name__}: {e}", "export_whoop")
+
+
+# ---------- Health check (M6) ----------
+
+
+def _component(status: str, detail: str, **extra: Any) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"status": status, "detail": detail}
+    out.update(extra)
+    return out
+
+
+def _rank(status: str) -> int:
+    # Higher = worse.
+    return {"ok": 0, "skipped": 0, "warn": 1, "fail": 2}.get(status, 2)
+
+
+async def _check_auth() -> Dict[str, Any]:
+    import time as _time
+    t0 = _time.perf_counter()
+    try:
+        info = _get_client().get_auth_status()
+    except Exception as e:
+        return _component("fail", f"get_auth_status raised: {type(e).__name__}")
+    latency_ms = int((_time.perf_counter() - t0) * 1000)
+    status_str = info.get("status") if isinstance(info, dict) else None
+    if status_str == "valid":
+        # Intentionally omit the raw timestamp (PII-adjacent); summarize.
+        return _component(
+            "ok",
+            "token valid",
+            latency_ms=latency_ms,
+            has_refresh_token=bool(info.get("has_refresh_token")),
+        )
+    if status_str == "expired":
+        if info.get("has_refresh_token"):
+            return _component(
+                "warn",
+                "token expired; refresh token available",
+                latency_ms=latency_ms,
+            )
+        return _component("fail", "token expired; no refresh token", latency_ms=latency_ms)
+    if status_str == "no_tokens":
+        return _component("fail", "no tokens on file", latency_ms=latency_ms)
+    return _component("warn", f"unknown auth status: {status_str!r}", latency_ms=latency_ms)
+
+
+async def _check_api(live: bool) -> Dict[str, Any]:
+    if not live:
+        return _component("skipped", "live=False; skipped network call")
+    import time as _time
+    import httpx as _httpx
+
+    t0 = _time.perf_counter()
+    try:
+        client = _get_client()
+        # Short timeout: the goal is liveness, not data.
+        resp = await asyncio.wait_for(client.get_profile(), timeout=5.0)
+    except asyncio.TimeoutError:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", "timeout after 5s", latency_ms=latency_ms)
+    except AuthError:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", "auth failed (401)", latency_ms=latency_ms)
+    except WhoopAPIError as e:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", f"{e.code}: {e.message[:120]}", latency_ms=latency_ms)
+    except _httpx.HTTPError as e:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", f"transport: {type(e).__name__}", latency_ms=latency_ms)
+    except Exception as e:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", f"{type(e).__name__}", latency_ms=latency_ms)
+    latency_ms = int((_time.perf_counter() - t0) * 1000)
+    return _component("ok", "reachable", latency_ms=latency_ms)
+
+
+def _check_cache_readable() -> Dict[str, Any]:
+    try:
+        store = _get_store()
+    except Exception as e:
+        return _component("fail", f"store init failed: {type(e).__name__}", rows_total=0)
+    total = 0
+    try:
+        for table in list(RECORD_TABLES) + list(SNAPSHOT_TABLES):
+            total += store.count(table)
+    except Exception as e:
+        return _component("fail", f"count failed: {type(e).__name__}", rows_total=0)
+    return _component("ok", f"cache has {total} rows across record + snapshot tables", rows_total=total)
+
+
+def _check_cache_writable() -> Dict[str, Any]:
+    try:
+        store = _get_store()
+        conn = store._connect()
+        with conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS _health ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL)"
+            )
+            cur = conn.execute(
+                "INSERT INTO _health (ts) VALUES (?)",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            rowid = cur.lastrowid
+            conn.execute("DELETE FROM _health WHERE id = ?", (rowid,))
+    except Exception as e:
+        return _component("fail", f"{type(e).__name__}: {e}")
+    return _component("ok", "sentinel write + delete succeeded")
+
+
+def _check_schema_version() -> Dict[str, Any]:
+    try:
+        store = _get_store()
+        conn = store._connect()
+        actual = conn.execute("PRAGMA user_version").fetchone()[0]
+    except Exception as e:
+        return _component("fail", f"{type(e).__name__}")
+    if actual == SCHEMA_VERSION:
+        return _component(
+            "ok", f"user_version={actual} expected={SCHEMA_VERSION}"
+        )
+    return _component(
+        "warn",
+        f"user_version={actual} expected={SCHEMA_VERSION}; migration may be needed",
+    )
+
+
+@mcp.tool()
+async def health_check(live: bool = True) -> Dict[str, Any]:
+    """Run server health checks and return a structured status dict.
+
+    Run before long operations or when diagnosing issues; fast local-only
+    mode available via ``live=False`` (skips the WHOOP API round-trip).
+
+    Returns::
+
+        {
+          "status": "healthy" | "degraded" | "unhealthy",
+          "checks": {
+            "auth":           {"status": "ok|warn|fail", "detail": "...", ...},
+            "api_reachable":  {"status": "ok|warn|fail|skipped", "detail": "...", ...},
+            "cache_readable": {"status": "ok|warn|fail", "detail": "...", "rows_total": N},
+            "cache_writable": {"status": "ok|warn|fail", "detail": "..."},
+            "schema_version": {"status": "ok|warn|fail", "detail": "user_version=..."}
+          },
+          "server_version": "...",
+          "timestamp": "<utc iso>"
+        }
+
+    Never raises. Never emits tokens or PII.
+    """
+    checks: Dict[str, Dict[str, Any]] = {}
+    try:
+        checks["auth"] = await _check_auth()
+    except Exception as e:  # pragma: no cover
+        checks["auth"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["api_reachable"] = await _check_api(live=live)
+    except Exception as e:  # pragma: no cover
+        checks["api_reachable"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["cache_readable"] = _check_cache_readable()
+    except Exception as e:
+        checks["cache_readable"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["cache_writable"] = _check_cache_writable()
+    except Exception as e:
+        checks["cache_writable"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["schema_version"] = _check_schema_version()
+    except Exception as e:
+        checks["schema_version"] = _component("fail", f"{type(e).__name__}")
+
+    worst = max(_rank(c["status"]) for c in checks.values())
+    if worst == 0:
+        overall = "healthy"
+    elif worst == 1:
+        overall = "degraded"
+    else:
+        overall = "unhealthy"
+
+    result = {
+        "status": overall,
+        "checks": checks,
+        "server_version": SERVER_VERSION,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+    }
+    try:
+        logger.info(
+            "health_check",
+            extra={
+                "event": "health_check",
+                "overall": overall,
+                "checks": {k: v["status"] for k, v in checks.items()},
+            },
+        )
+    except Exception:
+        pass
+    return result
 
 
 # ---------- Entry point ----------

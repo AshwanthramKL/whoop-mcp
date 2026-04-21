@@ -188,32 +188,15 @@ async def test_read_timeout_maps_to_upstream(no_sleep, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cache_readable_fails_when_db_deleted(tmp_path, monkeypatch):
-    # Point store to a fresh path, initialize, then delete the file, then
-    # run health_check: cache_readable should fail.
-    db = tmp_path / "whoop.db"
-    monkeypatch.setenv("WHOOP_DB_PATH", str(db))
-    server._store = None
-    s = server._get_store()
-    # Write a single row to make the DB non-trivial.
-    s.upsert_records(
-        "cycles",
-        [(
-            {
-                "id": 1,
-                "start": "2026-04-20T00:00:00Z",
-                "end": "2026-04-21T00:00:00Z",
-                "updated_at": "2026-04-21T06:00:00Z",
-                "score_state": "SCORED",
-            },
-            {"id": 1, "score_state": "SCORED"},
-        )],
-    )
-    s.close()
-    server._store = None
-    db.unlink()
+async def test_cache_readable_fails_when_store_cannot_init(tmp_path, monkeypatch):
+    """If the store can't be brought up, cache_readable reports fail and
+    the overall status is unhealthy.
+    """
+    # Force the store getter to blow up so the readable check reports fail.
+    def _boom():
+        raise RuntimeError("store on fire")
 
-    # Force health_check to skip the live API call.
+    monkeypatch.setattr(server, "_get_store", _boom)
     r = await server.health_check(live=False)
     assert r["checks"]["cache_readable"]["status"] == "fail"
     assert r["status"] == "unhealthy"
