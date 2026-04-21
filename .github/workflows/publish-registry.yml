@@ -1,0 +1,46 @@
+name: Publish to MCP Registry
+
+# Every tag push auto-publishes the matching server.json to
+# registry.modelcontextprotocol.io. The PyPI upload is a separate,
+# manual step (we run `twine upload` locally before tagging), so by
+# the time this workflow runs, PyPI already has the release and the
+# registry just needs to point at it.
+#
+# Auth: GitHub OIDC. No PATs, no secrets to rotate.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish-registry:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write    # required for OIDC → MCP registry
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+            | tar xz mcp-publisher
+
+      - name: Sync server.json version to tag
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Syncing server.json to version $VERSION"
+          # Bump both the top-level version and the inner package version.
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' \
+             server.json > server.tmp && mv server.tmp server.json
+          cat server.json
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Authenticate via GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish

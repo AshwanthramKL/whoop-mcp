@@ -142,13 +142,28 @@ per-record metadata.
 3. Prepend a `## [X.Y.Z] - YYYY-MM-DD` entry in Keep-a-Changelog format
    to `CHANGELOG.md`. Group under `### Added / Changed / Fixed / Removed`.
 4. `.venv/bin/pytest -q` must be green.
-5. Commit. `git tag -a vX.Y.Z -m "..."`. Push.
-6. `gh release create vX.Y.Z` with release notes cribbed from the
-   CHANGELOG entry.
+5. Build + upload to PyPI:
+   ```bash
+   rm -rf dist/ build/ src/whoop_mcp.egg-info
+   .venv/bin/python -m build
+   .venv/bin/twine check dist/*
+   .venv/bin/twine upload dist/whoop_mcp-X.Y.Z-py3-none-any.whl dist/whoop_mcp-X.Y.Z.tar.gz
+   ```
+6. Commit. `git tag -a vX.Y.Z -m "..."`. Push both main and the tag.
+7. `gh release create vX.Y.Z` with notes cribbed from CHANGELOG.
 
-Version drift between `__version__.py`, `pyproject.toml`, and
-`whoop_mcp_server.py`'s `SERVER_VERSION` is caught by
-`tests/test_version_import.py`.
+Steps 1–7 are manual. Two things auto-run on tag push:
+
+- **CI** (`.github/workflows/ci.yml`): lint + mypy + pytest on
+  ubuntu+macos × py310/11/12, plus build validation.
+- **MCP Registry publish** (`.github/workflows/publish-registry.yml`):
+  auto-syncs `server.json` to the tagged version and publishes to
+  `registry.modelcontextprotocol.io` via GitHub OIDC. No PATs involved.
+
+Version drift between `__version__.py`, `pyproject.toml`,
+`server.json`, and `whoop_mcp_server.py`'s `SERVER_VERSION` is caught
+by `tests/test_version_import.py` (for the first three) and
+auto-corrected for `server.json` by the registry workflow.
 
 ## 9. Don't
 
