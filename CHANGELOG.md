@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-04-21
+### Changed
+- README rewritten as a single cohesive document with a table of contents, a 17-tool catalog, and a data-model section.
+- Server `instructions` trimmed to <=300 chars, pointing to README for detail.
+- `SERVER_VERSION` now imports from `src/__version__.py` (single source of truth).
+- `pyproject.toml` version pinned to `0.7.1`.
+### Added
+- `CHANGELOG.md` covering M1 through M7.
+- `src/__version__.py` — single source of truth for package version.
+- `tests/test_version_import.py` — guards against version drift between `__version__.py`, `SERVER_VERSION`, and `pyproject.toml`.
+- `tests/test_readme_links.py` — verifies every internal link in README and CHANGELOG resolves.
+- `scripts/fresh_install_check.sh` — manual smoke test for the documented install path.
+### Removed
+- Unused `_LIST_TABLE_BY_RESOURCE` dict from `whoop_mcp_server.py` (verifier flagged).
+
 ## [0.7.0] - 2026-04-21
 ### Added
 - `health_check` tool with composite component status and optional live probe.
