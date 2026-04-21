@@ -105,7 +105,10 @@ class TestTokenManager(unittest.TestCase):
         access_token = tm.get_valid_access_token()
         self.assertIsNone(access_token)
     
-    @patch('auth_manager.httpx.AsyncClient.post')
+    @patch.dict(os.environ, {'WHOOP_CLIENT_ID': 'test_cid', 'WHOOP_CLIENT_SECRET': 'test_secret'})
+    @patch('auth_manager.WHOOP_CLIENT_ID', 'test_cid')
+    @patch('auth_manager.WHOOP_CLIENT_SECRET', 'test_secret')
+    @patch('requests.post')
     def test_token_refresh(self, mock_post):
         """Test token refresh functionality"""
         # Mock successful refresh response
@@ -119,12 +122,12 @@ class TestTokenManager(unittest.TestCase):
             'token_type': 'Bearer'
         }
         mock_post.return_value = mock_response
-        
+
         tm = TokenManager()
-        
+
         # Test refresh
         result = tm.refresh_tokens('old_refresh_token')
-        
+
         self.assertIsNotNone(result)
         self.assertEqual(result['access_token'], 'new_access_token')
         

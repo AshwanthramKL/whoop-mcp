@@ -1,312 +1,368 @@
 """
-Tests for WHOOP API client
+Tests for the M1 rewrite of WhoopClient.
+
+Covers the v2 surface, auto-pagination, retry/backoff, and structured errors.
+Uses respx to stub httpx without any real network.
 """
-import unittest
-from unittest.mock import patch, MagicMock, AsyncMock
+from __future__ import annotations
+
 import json
-import asyncio
+from pathlib import Path
+from typing import Any
 
-# Add src to path for imports
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+import httpx
+import pytest
+import respx
 
-from whoop_client import WhoopClient
+from whoop_client import (
+    AuthError,
+    NotFoundError,
+    RateLimitError,
+    UpstreamError,
+    ValidationError,
+    WhoopAPIError,
+    WhoopClient,
+)
+
+V2 = "https://api.prod.whoop.com/developer/v2"
 
 
-class TestWhoopClient(unittest.TestCase):
-    """Test cases for WhoopClient class"""
-    
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = None
-    
-    def tearDown(self):
-        """Clean up test fixtures"""
-        if self.client:
-            # Clear any cached data
-            self.client.clear_cache()
-    
-    @patch('whoop_client.TokenManager')
-    def test_client_initialization(self, mock_token_manager):
-        """Test WhoopClient initializes correctly"""
-        mock_token_manager.return_value = MagicMock()
-        
-        client = WhoopClient()
-        
-        self.assertIsNotNone(client.token_manager)
-        self.assertIsInstance(client.cache, dict)
-        self.assertIsNotNone(client.last_request_time)
-    
-    @patch('whoop_client.TokenManager')
-    def test_get_auth_headers_with_valid_token(self, mock_token_manager):
-        """Test auth headers generation with valid token"""
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = 'test_access_token'
-        mock_token_manager.return_value = mock_tm
-        
-        client = WhoopClient()
-        headers = client._get_auth_headers()
-        
-        expected = {
-            'Authorization': 'Bearer test_access_token',
-            'User-Agent': 'WHOOP-MCP-Server/1.0.0'
-        }
-        self.assertEqual(headers, expected)
-    
-    @patch('whoop_client.TokenManager')
-    def test_get_auth_headers_no_token(self, mock_token_manager):
-        """Test auth headers when no token available"""
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = None
-        mock_token_manager.return_value = mock_tm
-        
-        client = WhoopClient()
-        
-        with self.assertRaises(Exception) as context:
-            client._get_auth_headers()
-        
-        self.assertIn("No valid access token", str(context.exception))
-    
-    @patch('whoop_client.TokenManager')
-    def test_cache_key_generation(self, mock_token_manager):
-        """Test cache key generation"""
-        mock_token_manager.return_value = MagicMock()
-        
-        client = WhoopClient()
-        
-        # Test without parameters
-        key1 = client._get_cache_key('/user/profile/basic')
-        self.assertEqual(key1, '/user/profile/basic:{}')
-        
-        # Test with parameters
-        params = {'limit': 5, 'start_date': '2024-01-01'}
-        key2 = client._get_cache_key('/workout', params)
-        self.assertIn('/workout:', key2)
-        self.assertIn('limit', key2)
-        self.assertIn('start_date', key2)
-    
-    @patch('whoop_client.TokenManager')
-    def test_cache_operations(self, mock_token_manager):
-        """Test cache save and retrieve operations"""
-        mock_token_manager.return_value = MagicMock()
-        
-        client = WhoopClient()
-        cache_key = 'test_key'
-        test_data = {'test': 'data'}
-        
-        # Test cache miss
-        cached = client._get_from_cache(cache_key)
-        self.assertIsNone(cached)
-        
-        # Test cache save
-        client._save_to_cache(cache_key, test_data)
-        
-        # Test cache hit
-        cached = client._get_from_cache(cache_key)
-        self.assertEqual(cached, test_data)
-    
-    @patch('whoop_client.TokenManager')
-    def test_cache_expiration(self, mock_token_manager):
-        """Test cache expiration"""
-        mock_token_manager.return_value = MagicMock()
-        
-        client = WhoopClient()
-        cache_key = 'test_key'
-        test_data = {'test': 'data'}
-        
-        # Save data to cache
-        client._save_to_cache(cache_key, test_data)
-        
-        # Manually expire the cache entry
-        import time
-        client.cache[cache_key]['timestamp'] = time.time() - 400  # Expired
-        
-        # Should return None for expired cache
-        cached = client._get_from_cache(cache_key)
-        self.assertIsNone(cached)
-        
-        # Cache entry should be removed
-        self.assertNotIn(cache_key, client.cache)
-    
-    @patch('whoop_client.TokenManager')
-    @patch('whoop_client.httpx.AsyncClient.get')
-    async def test_api_request_success(self, mock_get, mock_token_manager):
-        """Test successful API request"""
-        # Setup mocks
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = 'test_token'
-        mock_token_manager.return_value = mock_tm
-        
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {'test': 'data'}
-        mock_get.return_value = mock_response
-        
-        client = WhoopClient()
-        
-        # Test API request
-        result = await client._api_request('/test/endpoint')
-        
-        self.assertEqual(result, {'test': 'data'})
-        mock_get.assert_called_once()
-    
-    @patch('whoop_client.TokenManager')
-    @patch('whoop_client.httpx.AsyncClient.get')
-    async def test_api_request_rate_limit(self, mock_get, mock_token_manager):
-        """Test API request with rate limiting"""
-        # Setup mocks
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = 'test_token'
-        mock_token_manager.return_value = mock_tm
-        
-        mock_response = MagicMock()
-        mock_response.status_code = 429  # Rate limited
-        mock_response.text = 'Rate limited'
-        mock_get.return_value = mock_response
-        
-        client = WhoopClient()
-        
-        # Test API request
-        with self.assertRaises(Exception) as context:
-            await client._api_request('/test/endpoint')
-        
-        self.assertIn("Rate limit", str(context.exception))
-    
-    @patch('whoop_client.TokenManager')
-    async def test_get_user_profile(self, mock_token_manager):
-        """Test get user profile method"""
-        # Setup mocks
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = 'test_token'
-        mock_token_manager.return_value = mock_tm
-        
-        client = WhoopClient()
-        
-        # Mock the _api_request method
-        expected_profile = {
-            'user_id': 12345,
-            'first_name': 'Test',
-            'last_name': 'User',
-            'email': 'test@example.com'
-        }
-        
-        with patch.object(client, '_api_request', new_callable=AsyncMock) as mock_api:
-            mock_api.return_value = expected_profile
-            
-            result = await client.get_user_profile()
-            
-            self.assertEqual(result, expected_profile)
-            mock_api.assert_called_once_with('/user/profile/basic')
-    
-    @patch('whoop_client.TokenManager')
-    async def test_get_workouts_with_params(self, mock_token_manager):
-        """Test get workouts with parameters"""
-        # Setup mocks
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = 'test_token'
-        mock_token_manager.return_value = mock_tm
-        
-        client = WhoopClient()
-        
-        expected_workouts = [
-            {'id': 1, 'type': 'running'},
-            {'id': 2, 'type': 'cycling'}
+# ---------- Single-resource endpoints ----------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_profile_returns_raw_json(fixture_loader):
+    payload = fixture_loader("profile")
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(200, json=payload))
+
+    client = WhoopClient()
+    result = await client.get_profile()
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_body_measurement(fixture_loader):
+    payload = fixture_loader("body_measurement")
+    respx.get(f"{V2}/user/measurement/body").mock(return_value=httpx.Response(200, json=payload))
+
+    client = WhoopClient()
+    result = await client.get_body_measurement()
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_cycle(fixture_loader):
+    payload = fixture_loader("cycle_single")
+    respx.get(f"{V2}/cycle/1446265073").mock(return_value=httpx.Response(200, json=payload))
+
+    client = WhoopClient()
+    result = await client.get_cycle(1446265073)
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_cycle_sleep(fixture_loader):
+    payload = fixture_loader("cycle_sleep")
+    respx.get(f"{V2}/cycle/1446265073/sleep").mock(return_value=httpx.Response(200, json=payload))
+
+    client = WhoopClient()
+    result = await client.get_cycle_sleep(1446265073)
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_cycle_recovery(fixture_loader):
+    payload = fixture_loader("cycle_recovery")
+    respx.get(f"{V2}/cycle/1446265073/recovery").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+    client = WhoopClient()
+    result = await client.get_cycle_recovery(1446265073)
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_sleep_uuid(fixture_loader):
+    payload = fixture_loader("sleep_single")
+    sid = "bb68db7b-bb56-44ce-ad8a-eb5a7a93b073"
+    respx.get(f"{V2}/activity/sleep/{sid}").mock(return_value=httpx.Response(200, json=payload))
+
+    client = WhoopClient()
+    result = await client.get_sleep(sid)
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_workout_uuid(fixture_loader):
+    payload = fixture_loader("workout_single")
+    wid = "a3f00067-344d-4d16-811c-b98b71f67b15"
+    respx.get(f"{V2}/activity/workout/{wid}").mock(return_value=httpx.Response(200, json=payload))
+
+    client = WhoopClient()
+    result = await client.get_workout(wid)
+    assert result == payload
+
+
+# ---------- Pagination ----------
+
+
+def _page(records: list[dict], next_token: str | None) -> dict:
+    return {"records": records, "next_token": next_token}
+
+
+def _fake_records(n: int, offset: int = 0) -> list[dict]:
+    return [{"id": i + offset, "x": i + offset} for i in range(n)]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_cycles_auto_paginates_three_pages():
+    # 25, 25, 10 -> 60 total
+    pages = [
+        _page(_fake_records(25, 0), "tok1"),
+        _page(_fake_records(25, 25), "tok2"),
+        _page(_fake_records(10, 50), None),
+    ]
+    call_idx = {"i": 0}
+
+    def _responder(request: httpx.Request) -> httpx.Response:
+        i = call_idx["i"]
+        call_idx["i"] += 1
+        return httpx.Response(200, json=pages[i])
+
+    respx.get(f"{V2}/cycle").mock(side_effect=_responder)
+
+    client = WhoopClient()
+    records = await client.list_cycles()
+    assert len(records) == 60
+    assert records[0]["id"] == 0
+    assert records[-1]["id"] == 59
+    assert call_idx["i"] == 3
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_cycles_limit_truncates_across_pages():
+    # limit=30 => fetch page 1 (25), page 2 (25), truncate to 30 total
+    pages = [
+        _page(_fake_records(25, 0), "tok1"),
+        _page(_fake_records(25, 25), "tok2"),
+    ]
+    call_idx = {"i": 0}
+
+    def _responder(request: httpx.Request) -> httpx.Response:
+        i = call_idx["i"]
+        call_idx["i"] += 1
+        return httpx.Response(200, json=pages[i])
+
+    respx.get(f"{V2}/cycle").mock(side_effect=_responder)
+
+    client = WhoopClient()
+    records = await client.list_cycles(limit=30)
+    assert len(records) == 30
+    assert records[0]["id"] == 0
+    assert records[-1]["id"] == 29
+    # Should stop after the second page since we already have >= 30 records.
+    assert call_idx["i"] == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_recoveries_and_sleeps_and_workouts_paginate():
+    for path, method in [
+        (f"{V2}/recovery", "list_recoveries"),
+        (f"{V2}/activity/sleep", "list_sleeps"),
+        (f"{V2}/activity/workout", "list_workouts"),
+    ]:
+        respx.reset()
+        pages = [
+            _page(_fake_records(25, 0), "t"),
+            _page(_fake_records(5, 25), None),
         ]
-        
-        with patch.object(client, '_api_request', new_callable=AsyncMock) as mock_api:
-            mock_api.return_value = expected_workouts
-            
-            result = await client.get_workouts(
-                start_date='2024-01-01',
-                end_date='2024-01-07',
-                limit=10
-            )
-            
-            self.assertEqual(result, expected_workouts)
-            
-            # Check that parameters were passed correctly
-            call_args = mock_api.call_args
-            self.assertEqual(call_args[0][0], '/activity/workout')
-            params = call_args[1]['params']
-            self.assertEqual(params['start'], '2024-01-01')
-            self.assertEqual(params['end'], '2024-01-07')
-            self.assertEqual(params['limit'], 10)
-    
-    @patch('whoop_client.TokenManager')
-    def test_get_auth_status(self, mock_token_manager):
-        """Test get auth status method"""
-        mock_tm = MagicMock()
-        mock_tm.get_token_info.return_value = {
-            'status': 'valid',
-            'expires_at': '2024-12-31T23:59:59',
-            'token_type': 'Bearer',
-            'has_refresh_token': True
-        }
-        mock_token_manager.return_value = mock_tm
-        
+        calls = {"i": 0}
+
+        def _responder(request: httpx.Request, _pages=pages, _calls=calls) -> httpx.Response:
+            i = _calls["i"]
+            _calls["i"] += 1
+            return httpx.Response(200, json=_pages[i])
+
+        respx.get(path).mock(side_effect=_responder)
         client = WhoopClient()
-        status = client.get_auth_status()
-        
-        self.assertEqual(status['status'], 'valid')
-        self.assertEqual(status['token_type'], 'Bearer')
-        self.assertTrue(status['has_refresh_token'])
-    
-    @patch('whoop_client.TokenManager')
-    def test_clear_cache(self, mock_token_manager):
-        """Test cache clearing"""
-        mock_token_manager.return_value = MagicMock()
-        
-        client = WhoopClient()
-        
-        # Add some cache data
-        client.cache['test_key'] = {'data': 'test'}
-        self.assertEqual(len(client.cache), 1)
-        
-        # Clear cache
-        client.clear_cache()
-        
-        # Cache should be empty
-        self.assertEqual(len(client.cache), 0)
+        records = await getattr(client, method)()
+        assert len(records) == 30, f"{method} should return 30 records"
 
 
-class TestWhoopClientAsync(unittest.IsolatedAsyncioTestCase):
-    """Test cases that require async test methods"""
-    
-    @patch('whoop_client.TokenManager')
-    async def test_multiple_concurrent_requests(self, mock_token_manager):
-        """Test multiple concurrent API requests"""
-        # Setup mocks
-        mock_tm = MagicMock()
-        mock_tm.get_valid_access_token.return_value = 'test_token'
-        mock_token_manager.return_value = mock_tm
-        
-        client = WhoopClient()
-        
-        # Mock different responses for different endpoints
-        async def mock_api_request(endpoint, params=None):
-            if 'profile' in endpoint:
-                return {'user_id': 123}
-            elif 'workout' in endpoint:
-                return [{'workout_id': 1}]
-            elif 'recovery' in endpoint:
-                return [{'recovery_score': 85}]
-            return {}
-        
-        with patch.object(client, '_api_request', side_effect=mock_api_request):
-            # Make concurrent requests
-            tasks = [
-                client.get_user_profile(),
-                client.get_workouts(limit=5),
-                client.get_recovery(limit=5)
-            ]
-            
-            results = await asyncio.gather(*tasks)
-            
-            self.assertEqual(results[0]['user_id'], 123)
-            self.assertEqual(len(results[1]), 1)
-            self.assertEqual(len(results[2]), 1)
+# ---------- Rate limiting and retries ----------
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.asyncio
+@respx.mock
+async def test_429_retries_after_retry_after_header(monkeypatch, fixture_loader):
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(s):
+        sleep_calls.append(s)
+
+    import whoop_client as wc
+    monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
+
+    payload = fixture_loader("profile")
+    responses = [
+        httpx.Response(429, headers={"Retry-After": "2"}, text="slow down"),
+        httpx.Response(200, json=payload),
+    ]
+    call_idx = {"i": 0}
+
+    def _responder(request: httpx.Request) -> httpx.Response:
+        i = call_idx["i"]
+        call_idx["i"] += 1
+        return responses[i]
+
+    respx.get(f"{V2}/user/profile/basic").mock(side_effect=_responder)
+
+    client = WhoopClient()
+    result = await client.get_profile()
+    assert result == payload
+    assert 2 in sleep_calls  # honored Retry-After
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_429_twice_raises_rate_limit_error(monkeypatch):
+    async def _fake_sleep(s):
+        return None
+
+    import whoop_client as wc
+    monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
+
+    respx.get(f"{V2}/user/profile/basic").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "1"}, text="nope")
+    )
+
+    client = WhoopClient()
+    with pytest.raises(RateLimitError):
+        await client.get_profile()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_5xx_exponential_backoff_then_success(monkeypatch, fixture_loader):
+    sleeps: list[float] = []
+
+    async def _fake_sleep(s):
+        sleeps.append(s)
+
+    import whoop_client as wc
+    monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
+
+    payload = fixture_loader("profile")
+    responses = [
+        httpx.Response(500, text="bad"),
+        httpx.Response(502, text="bad"),
+        httpx.Response(200, json=payload),
+    ]
+    call_idx = {"i": 0}
+
+    def _responder(request: httpx.Request) -> httpx.Response:
+        i = call_idx["i"]
+        call_idx["i"] += 1
+        return responses[i]
+
+    respx.get(f"{V2}/user/profile/basic").mock(side_effect=_responder)
+
+    client = WhoopClient()
+    result = await client.get_profile()
+    assert result == payload
+    # Expect exponential backoff sequence before the third try.
+    assert sleeps[:2] == [1, 2]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_5xx_exhausted_raises_upstream_error(monkeypatch):
+    async def _fake_sleep(s):
+        return None
+
+    import whoop_client as wc
+    monkeypatch.setattr(wc.asyncio, "sleep", _fake_sleep)
+
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(503, text="down"))
+
+    client = WhoopClient()
+    with pytest.raises(UpstreamError):
+        await client.get_profile()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_404_raises_not_found():
+    respx.get(f"{V2}/cycle/99999").mock(return_value=httpx.Response(404, text="nope"))
+
+    client = WhoopClient()
+    with pytest.raises(NotFoundError):
+        await client.get_cycle(99999)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_401_raises_auth_error():
+    respx.get(f"{V2}/user/profile/basic").mock(return_value=httpx.Response(401, text="no"))
+
+    client = WhoopClient()
+    with pytest.raises(AuthError):
+        await client.get_profile()
+
+
+# ---------- Validation ----------
+
+
+@pytest.mark.asyncio
+async def test_bad_date_raises_validation_error_before_network():
+    client = WhoopClient()
+    with pytest.raises(ValidationError):
+        await client.list_cycles(start="not-a-date")
+
+
+@pytest.mark.asyncio
+async def test_exception_hierarchy():
+    # All error subclasses must be WhoopAPIError
+    for cls in (AuthError, RateLimitError, NotFoundError, UpstreamError, ValidationError):
+        assert issubclass(cls, WhoopAPIError)
+
+
+# ---------- Query params plumbing ----------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_cycles_passes_date_params():
+    route = respx.get(f"{V2}/cycle").mock(
+        return_value=httpx.Response(200, json={"records": [], "next_token": None})
+    )
+    client = WhoopClient()
+    await client.list_cycles(start="2026-04-01T00:00:00Z", end="2026-04-08T00:00:00Z")
+    assert route.called
+    qp = dict(route.calls.last.request.url.params)
+    assert qp["start"] == "2026-04-01T00:00:00Z"
+    assert qp["end"] == "2026-04-08T00:00:00Z"
+    assert qp["limit"] == "25"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_cycles_authorization_header_sent():
+    route = respx.get(f"{V2}/cycle").mock(
+        return_value=httpx.Response(200, json={"records": [], "next_token": None})
+    )
+    client = WhoopClient()
+    await client.list_cycles()
+    assert route.called
+    assert route.calls.last.request.headers["authorization"] == "Bearer test-access-token"
