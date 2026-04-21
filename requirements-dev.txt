@@ -6,6 +6,7 @@ pytest-cov>=4.0.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.10.0
 respx>=0.21.0  # httpx route mocking for M1 client tests
+freezegun>=1.2.0  # time freezing for M2 daily_summary tests
 
 # Code quality
 black>=23.0.0

@@ -54,9 +54,75 @@ def stub_client(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_whoop_profile_happy(stub_client):
-    stub_client.get_profile.return_value = {"user_id": "<REDACTED>"}
+    stub_client.get_profile.return_value = {
+        "email": "x@y.z",
+        "first_name": "Ash",
+        "last_name": "K",
+        "user_id": "<REDACTED>",
+    }
     out = await server.get_whoop_profile()
-    assert out == {"user_id": "<REDACTED>"}
+    # M2: user_id stripped, rest flattened through
+    assert "user_id" not in out
+    assert out["email"] == "x@y.z"
+    assert out["first_name"] == "Ash"
+
+
+@pytest.mark.asyncio
+async def test_get_whoop_cycle_flatten(stub_client, fixture_loader):
+    stub_client.get_cycle.return_value = fixture_loader("cycle_single")
+    out = await server.get_whoop_cycle(cycle_id=1446265073)
+    assert out["id"] == 1446265073
+    assert "user_id" not in out
+    assert "score" not in out  # lifted up
+    assert out["score_state"] == "SCORED"
+    assert out["avg_hr_bpm"] == 67
+    assert "calories" in out
+
+
+@pytest.mark.asyncio
+async def test_list_whoop_cycles_records_are_flattened(stub_client, fixture_loader):
+    page = fixture_loader("cycles_page")
+    stub_client.list_cycles.return_value = page["records"]
+    out = await server.list_whoop_cycles()
+    assert "records" in out
+    first = out["records"][0]
+    assert "user_id" not in first
+    assert "score" not in first
+    assert "avg_hr_bpm" in first
+
+
+@pytest.mark.asyncio
+async def test_list_whoop_recoveries_flattened(stub_client, fixture_loader):
+    page = fixture_loader("recoveries_page")
+    stub_client.list_recoveries.return_value = page["records"]
+    out = await server.list_whoop_recoveries()
+    first = out["records"][0]
+    assert "user_id" not in first
+    assert "score" not in first
+    assert "hrv_rmssd_ms" in first
+    assert "resting_heart_rate_bpm" in first
+
+
+@pytest.mark.asyncio
+async def test_list_whoop_sleeps_flattened(stub_client, fixture_loader):
+    page = fixture_loader("sleeps_page")
+    stub_client.list_sleeps.return_value = page["records"]
+    out = await server.list_whoop_sleeps()
+    first = out["records"][0]
+    assert "score" not in first
+    assert "in_bed_seconds" in first
+    assert "deep_sleep_seconds" in first
+
+
+@pytest.mark.asyncio
+async def test_list_whoop_workouts_flattened(stub_client, fixture_loader):
+    page = fixture_loader("workouts_page")
+    stub_client.list_workouts.return_value = page["records"]
+    out = await server.list_whoop_workouts()
+    first = out["records"][0]
+    assert "user_id" not in first
+    assert "score" not in first
+    assert "calories" in first
 
 
 @pytest.mark.asyncio
@@ -171,6 +237,7 @@ def test_expected_tools_registered():
         "get_whoop_sleep",
         "list_whoop_workouts",
         "get_whoop_workout",
+        "get_whoop_daily_summary",
     }
     registered = set(server.mcp._tool_manager._tools.keys())
     missing = expected - registered

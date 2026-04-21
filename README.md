@@ -325,25 +325,56 @@ This is an unofficial integration with WHOOP. It uses the official WHOOP API but
 - [ ] Webhook support for real-time updates
 - [ ] Advanced analytics and insights
 
-## M1 Tool Catalog (v0.2.0)
+## M2 Tool Catalog (v0.3.0)
 
-The server exposes the full WHOOP v2 read surface as raw data. All list tools
-accept ISO-8601 `start` / `end` and auto-paginate internally.
+The server exposes the WHOOP v2 read surface plus one daily-join tool. All
+list tools accept ISO-8601 `start` / `end` and auto-paginate internally.
+
+Responses in M2 are **flattened**: raw WHOOP records are parsed through
+Pydantic v2 models (`src/whoop_models.py`). The server drops `user_id`,
+`v1_id`, and per-record `created_at`/`updated_at`; lifts the nested
+`score` wrapper; converts milliseconds to seconds (1 decimal); converts
+kilojoules to calories (kcal, rounded int); renames heart-rate keys to
+`avg_hr_bpm` / `max_hr_bpm`; renames HRV / SpO2 / skin-temp keys; and
+renames sleep stages to `deep_sleep_seconds`, `rem_sleep_seconds`,
+`light_sleep_seconds`, `awake_seconds`, `in_bed_seconds`. When
+`score_state != "SCORED"`, score fields are `null` and `score_state`
+is preserved at the top level so callers know why.
 
 | Tool | Purpose |
 |------|---------|
 | `get_whoop_auth_status` | Report OAuth token status (call first if other tools return `AUTH_FAILED`). |
-| `get_whoop_profile` | Authenticated user's WHOOP profile (name, email, user_id). |
-| `get_whoop_body_measurement` | Latest body measurements (height, weight, max HR). |
-| `list_whoop_cycles` | Physiological cycles in a time window; auto-paginated. |
+| `get_whoop_profile` | Authenticated user's WHOOP profile (name, email). |
+| `get_whoop_body_measurement` | Latest body measurements: `height_meter`, `weight_kilogram`, `max_hr_bpm`. |
+| `list_whoop_cycles` | Flat physiological cycles in a time window; auto-paginated. |
 | `get_whoop_cycle` | Fetch a single cycle by integer ID. |
-| `get_whoop_cycle_sleep` | Sleep record tied to a given cycle. |
-| `get_whoop_cycle_recovery` | Recovery record tied to a given cycle. |
-| `list_whoop_recoveries` | Recovery records (HRV / RHR / recovery score) in a window. |
-| `list_whoop_sleeps` | Sleep activities (incl. naps) in a window. |
+| `get_whoop_cycle_sleep` | Flat sleep record tied to a given cycle. |
+| `get_whoop_cycle_recovery` | Flat recovery record tied to a given cycle. |
+| `list_whoop_recoveries` | Flat recoveries (HRV / RHR / recovery score) in a window. |
+| `list_whoop_sleeps` | Flat sleep activities (incl. naps) in a window. |
 | `get_whoop_sleep` | Fetch a single sleep activity by UUID. |
-| `list_whoop_workouts` | Workouts in a window. |
+| `list_whoop_workouts` | Flat workouts with zone durations in seconds. |
 | `get_whoop_workout` | Fetch a single workout by UUID. |
+| `get_whoop_daily_summary` | Join: cycle + recovery + primary sleep + workouts for one UTC date. |
+
+`get_whoop_daily_summary(date="YYYY-MM-DD")` returns a single record:
+
+```json
+{
+  "date": "2026-04-20",
+  "cycle": {...} | null,
+  "recovery": {...} | null,
+  "sleep": {...} | null,
+  "workouts": [{...}],
+  "score_states": {"cycle": "SCORED", "recovery": "SCORED", "sleep": "SCORED"},
+  "warnings": ["recovery: UPSTREAM_ERROR ..."]
+}
+```
+
+Primary sleep is the longest non-nap sleep attached to the day's cycle.
+Partial upstream failures populate `warnings` and leave the failing field
+as `null`. Only when every fetch fails does the tool return an
+`UPSTREAM_ERROR` envelope. Timezone handling for M2 is UTC.
 
 Errors are returned as `{"error": {"code", "message", "endpoint"}}` —
 tools never raise. Codes: `AUTH_FAILED`, `RATE_LIMITED`, `NOT_FOUND`,
