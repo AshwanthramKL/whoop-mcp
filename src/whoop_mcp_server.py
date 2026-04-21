@@ -62,7 +62,11 @@ from whoop_sync import run_sync as _run_sync
 import whoop_export
 import whoop_logging
 
-SERVER_VERSION = "0.7.0"
+try:
+    # Single source of truth: package version.
+    from __version__ import __version__ as SERVER_VERSION  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - defensive fallback for odd sys.paths
+    SERVER_VERSION = "0.7.1"
 
 # M6: configure structured JSON logging + rotating file handler once at
 # import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
@@ -76,26 +80,11 @@ logger = logging.getLogger("whoop_mcp_server")
 mcp = FastMCP(
     "whoop",
     instructions=(
-        f"WHOOP MCP server v{SERVER_VERSION}. Read-only access to WHOOP v2 "
-        "with a local SQLite cache. Call ``sync_whoop`` once per session "
-        "(or when you know new WHOOP data exists) to refresh the cache; "
-        "list/get tools default to ``fresh=False`` and read from the "
-        "cache. Pass ``fresh=True`` to force an API call. The cache is "
-        "also exposed as MCP resources under whoop://db/... so you can "
-        "browse date slices without a tool call. All responses are "
-        "flattened (score wrappers lifted, durations seconds, energy "
-        "kcal, HR keys avg_hr_bpm/max_hr_bpm). Errors are a structured "
-        "envelope, never raised. Call ``export_whoop`` to dump cached "
-        "records to CSV / JSONL / Parquet on disk (requires a prior "
-        "``sync_whoop`` run). Call ``get_whoop_events(since=...)`` for a "
-        "chronological 'what's new' feed across all cached resources — "
-        "useful for activity feeds and incremental reads. The feed "
-        "returns an opaque composite cursor in ``next_cursor`` — pass "
-        "it back as ``since`` to paginate without skipping ties. Call "
-        "``health_check`` before long operations or when diagnosing "
-        "issues; a fast local-only mode is available via ``live=False``. "
-        "Logs are structured JSON on stderr plus a rotating file at "
-        "~/.whoop-mcp-server/logs/whoop-mcp.log."
+        f"WHOOP MCP server v{SERVER_VERSION}. Read-only WHOOP v2 data "
+        "via a local SQLite cache. Run sync_whoop once; list/get tools "
+        "read cache (fresh=True bypasses). Also: get_whoop_events, "
+        "export_whoop, health_check. Flattened responses; errors are an "
+        "envelope, never raised. See README.md for the full catalog."
     ),
 )
 
@@ -149,14 +138,6 @@ def _map_error(exc: BaseException, endpoint: str) -> Dict[str, Any]:
 
 
 # ---------- M3 helpers: cache-first list/get ----------
-
-
-_LIST_TABLE_BY_RESOURCE = {
-    "cycles": "cycles",
-    "recoveries": "recoveries",
-    "sleeps": "sleeps",
-    "workouts": "workouts",
-}
 
 
 async def _cache_first_list(

@@ -1,89 +1,67 @@
 # Changelog
 
-All notable changes to the WHOOP MCP Server project will be documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2025-01-21
-
+## [0.7.1] - 2026-04-21
+### Changed
+- README rewritten as a single cohesive document with a table of contents, a 17-tool catalog, and a data-model section.
+- Server `instructions` trimmed to <=300 chars, pointing to README for detail.
+- `SERVER_VERSION` now imports from `src/__version__.py` (single source of truth).
+- `pyproject.toml` version pinned to `0.7.1`.
 ### Added
-- 🎉 Initial release of WHOOP MCP Server
-- 🔐 Secure OAuth 2.0 integration with WHOOP API
-- 🏃 Complete WHOOP data access (profile, workouts, recovery, sleep, cycles)
-- 🤖 FastMCP server implementation for Claude Desktop integration
-- 🛡️ Encrypted local token storage with AES-256
-- ⚡ Smart caching system (5-minute cache duration)
-- 🔄 Automatic token refresh functionality
-- 📊 Rate limiting compliance with WHOOP API limits
-- 🔧 Interactive setup wizard for easy installation
-- 📚 Comprehensive documentation and troubleshooting guides
-- 🧪 Test suite with unit and integration tests
-- 🔒 Security-first design with local-only data storage
+- `CHANGELOG.md` covering M1 through M7.
+- `src/__version__.py` — single source of truth for package version.
+- `tests/test_version_import.py` — guards against version drift between `__version__.py`, `SERVER_VERSION`, and `pyproject.toml`.
+- `tests/test_readme_links.py` — verifies every internal link in README and CHANGELOG resolves.
+- `scripts/fresh_install_check.sh` — manual smoke test for the documented install path.
+### Removed
+- Unused `_LIST_TABLE_BY_RESOURCE` dict from `whoop_mcp_server.py` (verifier flagged).
 
-### Security
-- All authentication tokens encrypted with AES-256
-- Secure file permissions (600) for sensitive files
-- No third-party data sharing - all data stays local
-- Comprehensive security documentation and best practices
-- Security scanning integrated into CI/CD pipeline
+## [0.7.0] - 2026-04-21
+### Added
+- `health_check` tool with composite component status and optional live probe.
+- Composite events cursor (opaque base64 of `updated_at|resource|id`).
+- Snapshot hash dedupe — no spurious events on idempotent syncs.
+- JSON structured logging + rotating file handler at `~/.whoop-mcp-server/logs/`.
+- Async refresh lock to prevent token-refresh stampedes.
+- Fault-injection test suites (API, auth, cache).
+- `PRIVACY.md` detailing what the server reads, writes, sends, and logs.
+### Changed
+- `get_whoop_events.next_cursor` is now opaque (base64), not plain ISO-8601.
+### Fixed
+- Snapshot `updated_at` no longer bumps on byte-identical payloads.
 
-### Documentation
-- Complete installation guide with step-by-step instructions
-- Troubleshooting guide for common issues
-- Usage examples with natural language query samples
-- Security policy and vulnerability reporting process
-- API documentation for all available tools
+## [0.6.0] - 2026-04-21
+### Added
+- `get_whoop_events` cache-only feed tool with `since` / `until` / `resources` / `limit` parameters.
+- MCP resources: `whoop://db/events/{since}` and `whoop://db/events/{since}/{until}`.
 
-### Tools Available
-- `get_whoop_profile` - Get user profile information
-- `get_whoop_workouts` - Get workout data with filtering options
-- `get_whoop_recovery` - Get recovery data and trends
-- `get_whoop_sleep` - Get sleep data and analysis
-- `get_whoop_cycles` - Get physiological cycle data
-- `get_whoop_auth_status` - Check authentication status
-- `clear_whoop_cache` - Clear cached data for fresh requests
+## [0.5.0] - 2026-04-21
+### Added
+- `export_whoop` tool supporting CSV, JSONL, and Parquet output.
+- `pyarrow` dependency for Parquet writes with snappy compression.
 
-### Technical Features
-- Python 3.8+ compatibility
-- FastMCP for modern MCP protocol implementation
-- Async/await pattern for optimal performance
-- Comprehensive error handling and logging
-- Configurable through environment variables
-- Cross-platform support (macOS, Windows, Linux)
+## [0.4.0] - 2026-04-21
+### Added
+- SQLite local cache at `~/.whoop-mcp-server/whoop.db` with `chmod 600`.
+- `sync_whoop` tool with incremental `updated_at` cursor.
+- MCP resources: `whoop://db/{cycles,recoveries,sleeps,workouts,profile,body_measurement,sync_runs}`.
+- `fresh` parameter on all read tools (cache-first reads by default).
 
-## [Unreleased]
+## [0.3.0] - 2026-04-21
+### Added
+- Pydantic v2 response models for every resource.
+- `get_whoop_daily_summary` join tool (cycle + recovery + primary sleep + workouts for a UTC date).
+### Changed
+- All tool responses now return flattened LLM-friendly shapes (seconds not ms, kcal not kJ, `avg_hr_bpm` / `max_hr_bpm` instead of nested `score.average_heart_rate`).
 
-### Planned
-- [ ] Additional WHOOP API endpoints (stress, skin temperature)
-- [ ] Webhook support for real-time data updates
-- [ ] Data export functionality (CSV, JSON)
-- [ ] Advanced analytics and insights
-- [ ] Custom date range queries with calendar integration
-- [ ] Performance optimizations and caching improvements
-- [ ] Docker container support
-- [ ] Home Assistant integration
-- [ ] Grafana dashboard templates
-- [ ] Mobile notifications integration
-
-### Under Consideration
-- [ ] Multiple WHOOP account support
-- [ ] Data visualization tools
-- [ ] Historical data analysis features
-- [ ] Integration with other fitness platforms
-- [ ] Machine learning insights
-- [ ] Custom coaching recommendations
-
----
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-## Security
-
-For security vulnerabilities, please see our [Security Policy](SECURITY.md).
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## [0.2.0] - 2026-04-21
+### Changed
+- Moved from `/developer/v1` to `/developer/v2` (v1 endpoints deprecated by WHOOP).
+- Replaced third-party OAuth proxy with direct WHOOP OAuth using the user's own dev app.
+- Added `read:body_measurement` scope.
+### Added
+- `setup_direct_oauth.py` for local callback OAuth flow.
