@@ -23,6 +23,34 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture(autouse=True)
+def _isolate_store(tmp_path, monkeypatch):
+    """Give every test a fresh SQLite cache at a temp path.
+
+    M3 adds a module-level ``_store`` singleton in ``whoop_mcp_server``.
+    Without isolation, data cached by one test leaks into the next —
+    breaking tests that expect an empty cache or expect an API call to
+    actually reach the stubbed client.
+    """
+    db_path = str(tmp_path / "whoop.db")
+    monkeypatch.setenv("WHOOP_DB_PATH", db_path)
+    try:
+        import whoop_mcp_server as server
+    except Exception:
+        yield
+        return
+    # Reset the module-level store singleton so _get_store() re-reads
+    # WHOOP_DB_PATH for this test.
+    server._store = None
+    yield
+    if server._store is not None:
+        try:
+            server._store.close()
+        except Exception:
+            pass
+        server._store = None
+
+
+@pytest.fixture(autouse=True)
 def whoop_access_token(request, monkeypatch):
     """Patch TokenManager so WhoopClient instances get a stable fake token.
 
