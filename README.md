@@ -1,5 +1,11 @@
 # WHOOP MCP Server
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-compatible-6e6eff.svg)](https://modelcontextprotocol.io)
+[![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen.svg)](./tests)
+[![Version](https://img.shields.io/badge/version-0.7.7-informational.svg)](./CHANGELOG.md)
+
 A local Model Context Protocol (MCP) server that gives an LLM **read-only**
 access to your WHOOP fitness data. Authentication is direct OAuth against
 your own WHOOP developer app — there is no third-party proxy in the path.
@@ -8,12 +14,22 @@ All records are mirrored into a local SQLite cache at
 except for the authenticated calls the server itself makes to the WHOOP
 v2 API.
 
-Current version: **0.7.6** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **0.7.7** — see [CHANGELOG.md](./CHANGELOG.md).
+
+> **Just want to try it?** Copy the prompt in
+> [docs/AGENT_INSTALL_PROMPT.md](./docs/AGENT_INSTALL_PROMPT.md), paste
+> it into Claude Code / Claude Desktop / Cursor / Windsurf, and your
+> agent will do the install end-to-end.
+>
+> **Building on this repo?** Start with [AGENTS.md](./AGENTS.md) and
+> [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — they're the
+> load-bearing conventions and one-page system map.
 
 ## Table of contents
 
 - [What this is](#what-this-is)
-- [Install](#install)
+- [Install with your agent](#install-with-your-agent-recommended)
+- [Install manually](#install-manually)
 - [Quick start](#quick-start)
 - [Tool catalog](#tool-catalog)
 - [MCP resources](#mcp-resources)
@@ -24,6 +40,7 @@ Current version: **0.7.6** — see [CHANGELOG.md](./CHANGELOG.md).
 - [Operations](#operations)
 - [Security and privacy](#security-and-privacy)
 - [Development](#development)
+- [For agents building on this repo](#for-agents-building-on-this-repo)
 - [Versioning](#versioning)
 
 ## What this is
@@ -37,7 +54,15 @@ third-party server. The WHOOP records you fetch are written to a local
 SQLite cache (mode `0o600`) so subsequent reads are free and offline, and
 the cache file never leaves your machine.
 
-## Install
+## Install with your agent (recommended)
+
+Paste the prompt in [docs/AGENT_INSTALL_PROMPT.md](./docs/AGENT_INSTALL_PROMPT.md)
+into your MCP-aware agent (Claude Code, Claude Desktop, Cursor,
+Windsurf, Zed, Aider, …). The agent will clone, venv, run OAuth, and
+register the server with your client. You only have to authorize in a
+browser tab once.
+
+## Install manually
 
 Five-minute path, assuming Python 3.10+.
 
@@ -357,9 +382,25 @@ Keep-a-Changelog format → verify `SERVER_VERSION` in
 test prevents drift) → update `version` in `pyproject.toml` → tag
 `vX.Y.Z` on `main`.
 
+## For agents building on this repo
+
+Start here:
+
+- **[AGENTS.md](./AGENTS.md)** — load-bearing conventions. File layout,
+  error-envelope discipline, TDD loop, what-not-to-do, release flow.
+  Read before editing anything.
+- **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — one-page system
+  map. Four-layer diagram, read/write/sync/event paths, invariants.
+- **[docs/AGENT_INSTALL_PROMPT.md](./docs/AGENT_INSTALL_PROMPT.md)** —
+  the copy-pasteable prompt end users give their agent to install.
+
+Human contributors: [CONTRIBUTING.md](./CONTRIBUTING.md) has the short
+version. The test suite runs in ~6s (`.venv/bin/pytest -q`); every HTTP
+call is respx-mocked so you can iterate offline.
+
 ## Versioning
 
-Current version: **0.7.6** (see `src/__version__.py`). Semantic
+Current version: **0.7.7** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-04-22
+### Added
+- `AGENTS.md` at repo root — load-bearing conventions for AI agents (Claude Code, Cursor, Windsurf, Zed, Aider) working on this codebase. File layout, error-envelope discipline, TDD loop, "don't" list, release flow.
+- `docs/AGENT_INSTALL_PROMPT.md` — a literal prompt end users paste into their MCP-aware agent so the agent clones, venvs, OAuths, and registers the server end-to-end. Covers Claude Code, Claude Desktop, Cursor, and generic fallbacks.
+- `docs/ARCHITECTURE.md` — one-page system map: four-layer diagram, read/fresh/sync/event paths, local-disk layout, invariants, "where to add X".
+- README badges row (Python 3.10+, MIT, MCP-compatible, 183 tests passing, version).
+- README "Install with your agent (recommended)" section surfacing the paste-to-install prompt.
+- README "For agents building on this repo" section linking AGENTS.md and ARCHITECTURE.md.
+
 ## [0.7.6] - 2026-04-21
 ### Fixed (documentation and metadata)
 - README install commands pointed at the upstream fork repo and referenced a wrong OAuth redirect port (`:8765` vs the actual `:8000`). Updated to the current repo and the correct port.
