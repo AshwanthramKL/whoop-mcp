@@ -23,12 +23,19 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture(autouse=True)
-def whoop_access_token(monkeypatch):
-    """Patch TokenManager so every WhoopClient gets a stable fake token.
+def whoop_access_token(request, monkeypatch):
+    """Patch TokenManager so WhoopClient instances get a stable fake token.
 
-    Autouse so we never accidentally read ~/.whoop-mcp-server/tokens.json
-    during tests.
+    Applied automatically to the M1 test files (``test_whoop_client.py``,
+    ``test_mcp_tools.py``). Skipped for ``test_auth_manager.py``, which
+    exercises the real TokenManager.
     """
+    # Let the auth_manager tests use the real class.
+    test_path = str(request.node.fspath)
+    if "test_auth_manager" in test_path:
+        yield
+        return
+
     import auth_manager
 
     def _fake_get_valid_access_token(self):
@@ -42,20 +49,16 @@ def whoop_access_token(monkeypatch):
             "has_refresh_token": True,
         }
 
+    def _fake_init(self):
+        self.storage_path = "/tmp/whoop-test-tokens.json"
+        self.key_file = "/tmp/whoop-test-key"
+
     monkeypatch.setattr(
         auth_manager.TokenManager, "get_valid_access_token", _fake_get_valid_access_token
     )
     monkeypatch.setattr(
         auth_manager.TokenManager, "get_token_info", _fake_get_token_info
     )
-    # Block real disk/auth init from blowing up: override __init__ with a no-op
-    # shim that still sets attributes some code paths look for.
-    original_init = auth_manager.TokenManager.__init__
-
-    def _fake_init(self):
-        self.storage_path = "/tmp/whoop-test-tokens.json"
-        self.key_file = "/tmp/whoop-test-key"
-
     monkeypatch.setattr(auth_manager.TokenManager, "__init__", _fake_init)
     yield
 

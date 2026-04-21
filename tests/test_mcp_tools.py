@@ -55,8 +55,7 @@ def stub_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_whoop_profile_happy(stub_client):
     stub_client.get_profile.return_value = {"user_id": "<REDACTED>"}
-    fn = server.get_whoop_profile.fn
-    out = await fn()
+    out = await server.get_whoop_profile()
     assert out == {"user_id": "<REDACTED>"}
 
 
@@ -65,7 +64,7 @@ async def test_tool_auth_failed_error_mapping(stub_client):
     stub_client.get_profile.side_effect = AuthError(
         "AUTH_FAILED", 401, "bad token", "/user/profile/basic"
     )
-    out = await server.get_whoop_profile.fn()
+    out = await server.get_whoop_profile()
     assert out["error"]["code"] == "AUTH_FAILED"
     assert "endpoint" in out["error"]
 
@@ -75,14 +74,14 @@ async def test_tool_rate_limited_error_mapping(stub_client):
     stub_client.list_cycles.side_effect = RateLimitError(
         "RATE_LIMITED", 429, "slow", "/cycle"
     )
-    out = await server.list_whoop_cycles.fn()
+    out = await server.list_whoop_cycles()
     assert out["error"]["code"] == "RATE_LIMITED"
 
 
 @pytest.mark.asyncio
 async def test_tool_not_found_error_mapping(stub_client):
     stub_client.get_cycle.side_effect = NotFoundError("NOT_FOUND", 404, "no", "/cycle/1")
-    out = await server.get_whoop_cycle.fn(cycle_id=1)
+    out = await server.get_whoop_cycle(cycle_id=1)
     assert out["error"]["code"] == "NOT_FOUND"
 
 
@@ -91,7 +90,7 @@ async def test_tool_upstream_error_mapping(stub_client):
     stub_client.list_workouts.side_effect = UpstreamError(
         "UPSTREAM_ERROR", 503, "down", "/activity/workout"
     )
-    out = await server.list_whoop_workouts.fn()
+    out = await server.list_whoop_workouts()
     assert out["error"]["code"] == "UPSTREAM_ERROR"
 
 
@@ -100,14 +99,14 @@ async def test_tool_validation_error_mapping(stub_client):
     stub_client.list_sleeps.side_effect = ValidationError(
         "VALIDATION_ERROR", 0, "bad date", "/activity/sleep"
     )
-    out = await server.list_whoop_sleeps.fn(start="not-a-date")
+    out = await server.list_whoop_sleeps(start="not-a-date")
     assert out["error"]["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio
 async def test_tool_unexpected_exception_maps_to_upstream(stub_client):
     stub_client.get_body_measurement.side_effect = RuntimeError("boom")
-    out = await server.get_whoop_body_measurement.fn()
+    out = await server.get_whoop_body_measurement()
     assert out["error"]["code"] == "UPSTREAM_ERROR"
     # Must not leak a traceback, only the message string
     assert "Traceback" not in out["error"]["message"]
@@ -122,7 +121,7 @@ async def test_all_list_tools_never_raise(stub_client):
         (server.list_whoop_workouts, "list_workouts"),
     ]:
         getattr(stub_client, method).side_effect = RuntimeError("boom")
-        out = await tool.fn()
+        out = await tool()
         assert "error" in out
 
 
