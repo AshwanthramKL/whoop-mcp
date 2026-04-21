@@ -35,6 +35,7 @@ Schema (v1):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -272,23 +273,40 @@ class WhoopStore:
     ) -> int:
         """Upsert the single ``current`` row for a snapshot table.
 
-        Returns 1 if the stored raw_json changed (or the row is new),
-        0 if the payload was byte-identical to the stored one. This is
-        how incremental syncs stay idempotent for snapshot resources.
+        Uses a canonical SHA-256 hash of the raw payload to decide whether
+        anything actually changed:
+
+        - If the new payload hashes to the same value as the stored one,
+          this is a no-op: we do NOT update ``updated_at`` and we return 0.
+          This is what keeps ``sync_whoop()`` idempotent even across
+          repeated runs on unchanged upstream data, and it's what keeps
+          the event feed quiet when nothing meaningful moved.
+
+        - If the hashes differ, we overwrite and advance ``updated_at``
+          (to the payload's own ``updated_at`` when present, else
+          ``now``). Returns 1.
         """
         if table not in SNAPSHOT_TABLES:
             raise ValueError(f"upsert_snapshot: unknown table {table!r}")
-        updated_at = raw.get("updated_at") or _utcnow_iso()
+
         raw_blob = json.dumps(raw, default=str, sort_keys=True)
         flat_blob = json.dumps(flat, default=str, sort_keys=True)
+        new_hash = hashlib.sha256(raw_blob.encode("utf-8")).hexdigest()
+
         with self._lock:
             conn = self._connect()
             with conn:
                 existing = conn.execute(
                     f"SELECT raw_json FROM {table} WHERE id = 'current'"
                 ).fetchone()
-                if existing is not None and existing["raw_json"] == raw_blob:
-                    return 0
+                if existing is not None:
+                    existing_hash = hashlib.sha256(
+                        (existing["raw_json"] or "").encode("utf-8")
+                    ).hexdigest()
+                    if existing_hash == new_hash:
+                        return 0
+
+                updated_at = raw.get("updated_at") or _utcnow_iso()
                 conn.execute(
                     f"""
                     INSERT INTO {table} (id, updated_at, raw_json, flat_json)
