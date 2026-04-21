@@ -336,6 +336,16 @@ async def run_sync(
     else:
         status = "partial"
 
+    # Backfill NULL start/end on recoveries from their parent cycle. Runs every sync
+    # (idempotent) so records inserted before the parent cycle existed get patched
+    # on the next pass.
+    try:
+        backfilled = store.backfill_recovery_windows()
+        if backfilled:
+            _log("recovery_windows_backfilled", rows_updated=backfilled)
+    except Exception as exc:  # noqa: BLE001 — backfill is best-effort
+        logger.warning("backfill_recovery_windows failed: %s", exc)
+
     completed_at = _utcnow_iso()
     _log(
         "sync_complete",

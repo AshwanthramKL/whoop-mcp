@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-04-21
+### Fixed
+- Recoveries stored with NULL `start`/`end` because WHOOP v2 recovery payloads carry no own timestamps (recoveries are attached to a cycle). Cache-first reads with a date window returned 0 rows for recoveries even when hundreds existed. Upsert now inherits `start`/`end` from the parent cycle, and a post-sync `backfill_recovery_windows()` pass repairs any rows inserted before their parent cycle existed (race-proof against parallel sync).
+
 ## [0.7.3] - 2026-04-21
 ### Fixed
 - Cache-read helpers (`query_range`, `iter_records`) filtered by `start` column inclusion only. WHOOP cycles/sleeps/workouts frequently span across date boundaries (e.g. a cycle starting 21:23 on day N-1 and ending on day N), so cache reads missed records that the live API included. Both helpers now use overlap semantics: a record is returned when its `[start, end]` range intersects the requested window, matching the API. In-progress records (`end IS NULL`) are treated as still ongoing. Cache-first reads (`fresh=False`) and live reads (`fresh=True`) now return the same record IDs for the same window.

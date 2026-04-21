@@ -238,6 +238,19 @@ class WhoopStore:
                     cycle_id = raw.get("cycle_id")
                     cycle_id_s = str(cycle_id) if cycle_id is not None else None
 
+                    # Recoveries have no own start/end in v2 — inherit from parent cycle
+                    # so date-window queries work. If the cycle isn't in the DB yet, the
+                    # backfill helper below will fix it on a subsequent sync.
+                    start_val = raw.get("start")
+                    end_val = raw.get("end")
+                    if table == "recoveries" and start_val is None and cycle_id_s is not None:
+                        cyc = conn.execute(
+                            'SELECT start, "end" FROM cycles WHERE id = ?', (cycle_id_s,)
+                        ).fetchone()
+                        if cyc is not None:
+                            start_val = cyc["start"]
+                            end_val = cyc["end"]
+
                     conn.execute(
                         f"""
                         INSERT INTO {table}
@@ -254,8 +267,8 @@ class WhoopStore:
                         """,
                         (
                             pk_s,
-                            raw.get("start"),
-                            raw.get("end"),
+                            start_val,
+                            end_val,
                             updated_at,
                             raw.get("score_state"),
                             cycle_id_s,
@@ -265,6 +278,26 @@ class WhoopStore:
                     )
                     count += 1
         return count
+
+    def backfill_recovery_windows(self) -> int:
+        """Populate NULL start/end on recoveries by copying from the parent cycle.
+
+        Idempotent. Call after cycles are synced. Returns rows updated.
+        """
+        with self._lock:
+            conn = self._connect()
+            with conn:
+                cur = conn.execute(
+                    '''
+                    UPDATE recoveries
+                       SET start = (SELECT c.start FROM cycles c WHERE c.id = recoveries.cycle_id),
+                           "end" = (SELECT c."end" FROM cycles c WHERE c.id = recoveries.cycle_id)
+                     WHERE (start IS NULL OR "end" IS NULL)
+                       AND cycle_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM cycles c WHERE c.id = recoveries.cycle_id)
+                    '''
+                )
+                return cur.rowcount
 
     # ----- snapshot upsert (single "current" row) -----
 

@@ -169,6 +169,65 @@ def test_range_query_by_start(store: WhoopStore):
     assert len(rows) == 2
 
 
+def test_recovery_start_end_inherited_from_cycle(store: WhoopStore):
+    """Regression: WHOOP v2 recoveries lack their own start/end. Upsert must
+    inherit them from the linked cycle so date-window queries work."""
+    # Insert the parent cycle first.
+    store.upsert_records("cycles", [(
+        _raw_cycle(4001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z", "2026-04-19T08:00:00Z"),
+        _flat_cycle(4001, "2026-04-18T21:23:00Z", "2026-04-19T07:12:00Z"),
+    )])
+    # Recovery raw payload with NO start/end (as WHOOP actually returns).
+    raw_rec = {
+        "cycle_id": 4001,
+        "sleep_id": "s-4001",
+        "updated_at": "2026-04-19T08:30:00Z",
+        "score_state": "SCORED",
+        "score": {"recovery_score": 72, "hrv_rmssd_milli": 45.0, "resting_heart_rate": 58},
+    }
+    flat_rec = {"cycle_id": 4001, "sleep_id": "s-4001", "score_state": "SCORED", "recovery_score": 72.0}
+    store.upsert_records("recoveries", [(raw_rec, flat_rec)])
+
+    # Querying by cycle's date window must return the recovery.
+    rows = store.query_range(
+        "recoveries",
+        start="2026-04-19T00:00:00Z",
+        end="2026-04-20T00:00:00Z",
+    )
+    assert len(rows) == 1, "recovery inherited from cycle's start/end should be in window"
+    assert rows[0]["cycle_id"] == 4001
+
+
+def test_backfill_recovery_windows(store: WhoopStore):
+    """Backfill repairs recoveries inserted before their parent cycle existed."""
+    # Recovery inserted first (simulating async sync where recoveries raced ahead).
+    raw_rec = {
+        "cycle_id": 5001,
+        "sleep_id": "s-5001",
+        "updated_at": "2026-04-19T08:30:00Z",
+        "score_state": "SCORED",
+        "score": {"recovery_score": 80},
+    }
+    store.upsert_records("recoveries", [(raw_rec, {"cycle_id": 5001, "score_state": "SCORED"})])
+    # Nothing to inherit yet — start/end should be NULL.
+    pre = store.query_range("recoveries",
+                            start="2026-04-19T00:00:00Z", end="2026-04-20T00:00:00Z")
+    assert len(pre) == 0
+
+    # Now cycle arrives.
+    store.upsert_records("cycles", [(
+        _raw_cycle(5001, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z", "2026-04-19T08:00:00Z"),
+        _flat_cycle(5001, "2026-04-18T22:00:00Z", "2026-04-19T06:00:00Z"),
+    )])
+    # Run backfill.
+    n = store.backfill_recovery_windows()
+    assert n == 1, "one recovery row should be patched"
+
+    post = store.query_range("recoveries",
+                             start="2026-04-19T00:00:00Z", end="2026-04-20T00:00:00Z")
+    assert len(post) == 1
+
+
 def test_range_query_uses_overlap_semantics(store: WhoopStore):
     """Regression: a cycle starting before the window but spanning into it must be returned.
 
