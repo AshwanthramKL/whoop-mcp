@@ -1,585 +1,358 @@
-# 🏃 WHOOP MCP Server
+# WHOOP MCP Server
 
-> Connect your WHOOP fitness data to Claude Desktop through the Model Context Protocol (MCP)
+A local Model Context Protocol (MCP) server that gives an LLM **read-only**
+access to your WHOOP fitness data. Authentication is direct OAuth against
+your own WHOOP developer app — there is no third-party proxy in the path.
+All records are mirrored into a local SQLite cache at
+`~/.whoop-mcp-server/whoop.db`, and **no data ever leaves your machine**
+except for the authenticated calls the server itself makes to the WHOOP
+v2 API.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
-[![smithery badge](https://smithery.ai/badge/@RomanEvstigneev/whoop-mcp-server)](https://smithery.ai/server/@RomanEvstigneev/whoop-mcp-server)
+Current version: **0.7.1** — see [CHANGELOG.md](./CHANGELOG.md).
 
-Transform your WHOOP fitness data into actionable insights through natural language queries in Claude Desktop. Ask questions about your workouts, recovery, sleep patterns, and more - all while keeping your data secure and private.
+## Table of contents
 
-> 🚀 **NEW**: Try the [Smithery hosted version](./smithery/) for zero-setup deployment!
+- [What this is](#what-this-is)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Tool catalog](#tool-catalog)
+- [MCP resources](#mcp-resources)
+- [Data model](#data-model)
+- [Sync model](#sync-model)
+- [Event feed](#event-feed)
+- [Exports](#exports)
+- [Operations](#operations)
+- [Security and privacy](#security-and-privacy)
+- [Development](#development)
+- [Versioning](#versioning)
 
-## ✨ Features
+## What this is
 
-🔐 **Secure OAuth Integration** - Safe WHOOP account connection with encrypted local storage  
-🏃 **Complete Data Access** - Workouts, recovery, sleep, cycles, and profile information  
-🤖 **Natural Language Queries** - Ask Claude about your fitness data in plain English  
-⚡ **Smart Caching** - Optimized performance with intelligent data caching  
-🛡️ **Privacy First** - All data stays on your machine, never sent to third parties  
-🔄 **Auto Token Refresh** - Seamless experience with automatic authentication renewal
+The WHOOP MCP Server is a small Python process that speaks MCP over stdio.
+It exposes WHOOP v2 data (profile, body measurement, cycles, recoveries,
+sleeps, workouts) to any MCP-capable client — primarily Claude Desktop and
+Claude Code. The server is read-only. It authenticates with WHOOP using an
+OAuth app you register yourself, so your tokens never travel through a
+third-party server. The WHOOP records you fetch are written to a local
+SQLite cache (mode `0o600`) so subsequent reads are free and offline, and
+the cache file never leaves your machine.
 
-## 🚀 Quick Start
+## Install
 
-### 🎯 Choose Your Deployment Method
-
-**Option A: Smithery Hosted (Recommended for beginners)**
-- ✅ Zero installation complexity
-- ✅ Automatic updates and maintenance
-- ✅ Enterprise-grade hosting
-- ➡️ **[Get started with Smithery](./smithery/README.md)**
-
-**Option B: Local Installation (Advanced users)**
-- ✅ Full control and privacy
-- ✅ No external dependencies
-- ✅ Customize and extend
-- ➡️ **Continue with local setup below**
-
----
-
-## 📦 Local Installation
-
-### 1. Prerequisites
-- Python 3.8+
-- Claude Desktop
-- Active WHOOP account
-
-### 2. Installation
+Five-minute path, assuming Python 3.10+.
 
 ```bash
+# 1. Clone and create a venv.
 git clone https://github.com/romanevstigneev/whoop-mcp-server.git
 cd whoop-mcp-server
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+
+# 2. Create a WHOOP developer app.
+#    https://developer.whoop.com  ->  Create App
+#    Redirect URI:  http://localhost:8765/callback
+#    Scopes:        read:profile read:body_measurement read:recovery
+#                   read:sleep read:workout offline
+
+# 3. Paste your credentials into the environment.
+export WHOOP_CLIENT_ID="<your client id>"
+export WHOOP_CLIENT_SECRET="<your client secret>"
+
+# 4. Run the one-shot OAuth flow (opens a browser tab, local callback,
+#    saves encrypted tokens to ~/.whoop-mcp-server/tokens.json).
+python setup_direct_oauth.py
+
+# 5. Register with Claude.
+claude mcp add whoop -- /absolute/path/to/whoop-mcp-server/.venv/bin/python \
+  /absolute/path/to/whoop-mcp-server/src/whoop_mcp_server.py
 ```
 
-### 3. Setup
-
-#### Option A: Interactive Setup (Recommended)
-
-Run the interactive setup:
-```bash
-python setup.py
-```
-
-This will:
-- Open your browser for WHOOP OAuth authorization
-- Securely save your tokens locally
-- Provide Claude Desktop configuration
-
-#### Option B: Manual WHOOP OAuth Setup
-
-If the interactive setup doesn't work, you can manually get your WHOOP tokens:
-
-1. **Open WHOOP OAuth Page**: 
-   👉 **[Click here to authorize WHOOP access](https://personal-integrations-462307.uc.r.appspot.com/)**
-
-2. **Authorize Your Account**:
-   - Log in with your WHOOP credentials
-   - Grant permissions for the requested scopes:
-     - `read:profile` - Access to your profile information
-     - `read:workout` - Access to workout data
-     - `read:recovery` - Access to recovery data
-     - `read:sleep` - Access to sleep data
-     - `offline` - Refresh token for continued access
-
-3. **Copy Authorization Code**:
-   - After authorization, you'll see a success page
-   - **Copy the entire authorization code** (long string starting with letters/numbers)
-   - It looks like: `ABC123...XYZ789` (much longer)
-
-4. **Exchange Code for Tokens**:
-   ```bash
-   python -c "
-   import sys
-   sys.path.insert(0, './src')
-   from auth_manager import TokenManager
-   import requests
-   
-   # Paste your authorization code here
-   auth_code = 'YOUR_AUTHORIZATION_CODE_HERE'
-   
-   # Exchange for tokens
-   url = f'https://personal-integrations-462307.uc.r.appspot.com/api/get-tokens/{auth_code}'
-   response = requests.get(url, timeout=30)
-   
-   if response.status_code == 200:
-       token_data = response.json()
-       if token_data.get('success'):
-           # Save tokens
-           token_manager = TokenManager()
-           token_manager.save_tokens(token_data)
-           print('✅ Tokens saved successfully!')
-       else:
-           print('❌ Token exchange failed')
-   else:
-       print(f'❌ HTTP Error: {response.status_code}')
-   "
-   ```
-
-5. **Verify Setup**:
-   ```bash
-   python -c "
-   import sys
-   sys.path.insert(0, './src')
-   from whoop_client import WhoopClient
-   client = WhoopClient()
-   print(f'✅ Auth status: {client.get_auth_status()}')
-   "
-   ```
-
-### 4. Configure Claude Desktop
-
-Add to your Claude Desktop settings:
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\\Claude\\claude_desktop_config.json`
-**Linux**: `~/.config/claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "whoop": {
-      "command": "/opt/miniconda3/bin/python",
-      "args": ["/path/to/whoop-mcp-server/src/whoop_mcp_server.py"],
-      "env": {
-        "PYTHONPATH": "/path/to/whoop-mcp-server/src"
-      }
-    }
-  }
-}
-```
-
-**⚠️ Important**: Use the full Python path (find yours with `which python3`)
-
-### 5. Restart Claude Desktop
-
-After adding the configuration, restart Claude Desktop to load the WHOOP server.
-
-## 💡 Usage Examples
-
-Once configured, you can ask Claude:
-
-- **"Show my WHOOP profile"**
-- **"What were my workouts this week?"**
-- **"How is my recovery trending?"**
-- **"Show my sleep data for the last 7 days"**
-- **"What's my HRV looking like?"**
-- **"Compare my recovery to last month"**
-
-## 🛠️ Available Tools
-
-### `get_whoop_profile`
-Get your WHOOP user profile information.
-
-### `get_whoop_workouts`
-Get workout data with optional filters:
-- `start_date` (YYYY-MM-DD)
-- `end_date` (YYYY-MM-DD)
-- `limit` (number of results)
-
-### `get_whoop_recovery`
-Get recovery data with optional filters:
-- `start_date` (YYYY-MM-DD)
-- `end_date` (YYYY-MM-DD)
-- `limit` (number of results)
-
-### `get_whoop_sleep`
-Get sleep data with optional filters:
-- `start_date` (YYYY-MM-DD)
-- `end_date` (YYYY-MM-DD)
-- `limit` (number of results)
-
-### `get_whoop_cycles`
-Get physiological cycles (daily data) with optional filters:
-- `start_date` (YYYY-MM-DD)
-- `end_date` (YYYY-MM-DD)
-- `limit` (number of results)
-
-### `get_whoop_auth_status`
-Check authentication status and token information.
-
-### `clear_whoop_cache`
-Clear cached data to force fresh API calls.
-
-## 🔐 Security
-
-- **Token Encryption**: All tokens are encrypted at rest using AES encryption
-- **Local Storage**: Tokens are stored locally on your machine, never sent to third parties
-- **Secure Permissions**: Token files have restricted permissions (600)
-- **Auto-Refresh**: Tokens are automatically refreshed when expired
-
-## 📊 Data Caching
-
-- **Smart Caching**: API responses are cached for 5 minutes to improve performance
-- **Rate Limiting**: Built-in rate limiting to respect WHOOP API limits
-- **Cache Control**: Manual cache clearing available
-
-## 🔧 Configuration
-
-Environment variables (optional):
-- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
-- `LOG_FILE`: Log file path (default: console only)
-
-## 🆚 Deployment Comparison
-
-| Feature | [Smithery Hosted](./smithery/) | Local Installation |
-|---------|-----------------|-------------------|
-| **Setup Time** | ⚡ 2 minutes | ⏱️ 10-15 minutes |
-| **Complexity** | 🟢 Beginner-friendly | 🟡 Technical setup required |
-| **Maintenance** | ✅ Zero (auto-updates) | 🔧 Manual updates needed |
-| **Performance** | 🚀 Optimized hosting | 💻 Depends on local setup |
-| **Privacy** | 🌐 Hosted platform | 🔒 Fully local |
-| **Dependencies** | ❌ None | 🐍 Python, packages, OAuth |
-| **Troubleshooting** | 📞 Platform support | 🛠️ Self-service |
-
-## 📁 File Structure
-
-```
-whoop-mcp-server/
-├── src/                       # Python local installation
-│   ├── whoop_mcp_server.py    # Main MCP server
-│   ├── whoop_client.py        # WHOOP API client
-│   ├── auth_manager.py        # Token management
-│   └── config.py              # Configuration
-├── smithery/                  # TypeScript source files
-│   └── src/
-│       ├── index.ts           # Smithery MCP server
-│       ├── whoop-client.ts    # TypeScript WHOOP client
-│       └── types.ts           # Type definitions
-├── storage/                   # Local installation only
-│   ├── tokens.json            # Encrypted tokens (auto-generated)
-│   └── .encryption_key        # Encryption key (auto-generated)
-├── package.json               # Node.js dependencies (Smithery)
-├── smithery.yaml              # Smithery configuration (root required)
-├── tsconfig.json              # TypeScript configuration
-├── setup.py                   # Interactive setup script
-└── requirements.txt           # Python dependencies
-```
-
-## 🐛 Troubleshooting
-
-### "No valid access token available"
-- Run `python setup.py` to re-authorize
-- Check that your WHOOP account is active
-
-### "Authentication failed"
-- Your tokens may have expired beyond refresh
-- Run `python setup.py` to get new tokens
-
-### "Rate limit exceeded"
-- Wait a minute before making more requests
-- Consider using cached data or reducing request frequency
-
-### Claude Desktop doesn't see the server
-- **Use full Python path**: Change `"command": "python"` to `"command": "/opt/miniconda3/bin/python"` (use `which python3` to find yours)
-- **Check correct config file**: Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (not `.claude.json`)
-- **Use absolute paths**: Full paths like `/Users/username/whoop-mcp-server/src/whoop_mcp_server.py`
-- **Check logs**: `tail -f ~/Library/Logs/Claude/mcp-server-whoop.log`
-- Restart Claude Desktop after configuration changes
-
-## 🔄 Token Refresh
-
-The server automatically refreshes expired tokens using the refresh token. If this fails, you'll need to re-authorize:
-
-```bash
-python setup.py
-```
-
-## 📝 Logging
-
-Logs are written to console by default. To log to a file:
-
-```bash
-export LOG_FILE="/path/to/whoop-mcp.log"
-export LOG_LEVEL="INFO"
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## ⚠️ Disclaimer
-
-This is an unofficial integration with WHOOP. It uses the official WHOOP API but is not endorsed by WHOOP.
-
-## 📞 Support
-
-- Check the troubleshooting section above
-- Open an issue on GitHub
-- Review WHOOP API documentation at https://developer.whoop.com/
-
-## 🎯 Roadmap
-
-- [ ] Historical data analysis
-- [ ] Custom date range queries
-- [ ] Data export functionality
-- [ ] Webhook support for real-time updates
-- [ ] Advanced analytics and insights
-
-## M2 Tool Catalog (v0.3.0)
-
-The server exposes the WHOOP v2 read surface plus one daily-join tool. All
-list tools accept ISO-8601 `start` / `end` and auto-paginate internally.
-
-Responses in M2 are **flattened**: raw WHOOP records are parsed through
-Pydantic v2 models (`src/whoop_models.py`). The server drops `user_id`,
-`v1_id`, and per-record `created_at`/`updated_at`; lifts the nested
-`score` wrapper; converts milliseconds to seconds (1 decimal); converts
-kilojoules to calories (kcal, rounded int); renames heart-rate keys to
-`avg_hr_bpm` / `max_hr_bpm`; renames HRV / SpO2 / skin-temp keys; and
-renames sleep stages to `deep_sleep_seconds`, `rem_sleep_seconds`,
-`light_sleep_seconds`, `awake_seconds`, `in_bed_seconds`. When
-`score_state != "SCORED"`, score fields are `null` and `score_state`
-is preserved at the top level so callers know why.
-
-| Tool | Purpose |
-|------|---------|
-| `get_whoop_auth_status` | Report OAuth token status (call first if other tools return `AUTH_FAILED`). |
-| `get_whoop_profile` | Authenticated user's WHOOP profile (name, email). |
-| `get_whoop_body_measurement` | Latest body measurements: `height_meter`, `weight_kilogram`, `max_hr_bpm`. |
-| `list_whoop_cycles` | Flat physiological cycles in a time window; auto-paginated. |
-| `get_whoop_cycle` | Fetch a single cycle by integer ID. |
-| `get_whoop_cycle_sleep` | Flat sleep record tied to a given cycle. |
-| `get_whoop_cycle_recovery` | Flat recovery record tied to a given cycle. |
-| `list_whoop_recoveries` | Flat recoveries (HRV / RHR / recovery score) in a window. |
-| `list_whoop_sleeps` | Flat sleep activities (incl. naps) in a window. |
-| `get_whoop_sleep` | Fetch a single sleep activity by UUID. |
-| `list_whoop_workouts` | Flat workouts with zone durations in seconds. |
-| `get_whoop_workout` | Fetch a single workout by UUID. |
-| `get_whoop_daily_summary` | Join: cycle + recovery + primary sleep + workouts for one UTC date. |
-
-`get_whoop_daily_summary(date="YYYY-MM-DD")` returns a single record:
-
-```json
-{
-  "date": "2026-04-20",
-  "cycle": {...} | null,
-  "recovery": {...} | null,
-  "sleep": {...} | null,
-  "workouts": [{...}],
-  "score_states": {"cycle": "SCORED", "recovery": "SCORED", "sleep": "SCORED"},
-  "warnings": ["recovery: UPSTREAM_ERROR ..."]
-}
-```
-
-Primary sleep is the longest non-nap sleep attached to the day's cycle.
-Partial upstream failures populate `warnings` and leave the failing field
-as `null`. Only when every fetch fails does the tool return an
-`UPSTREAM_ERROR` envelope. Timezone handling for M2 is UTC.
-
-Errors are returned as `{"error": {"code", "message", "endpoint"}}` —
-tools never raise. Codes: `AUTH_FAILED`, `RATE_LIMITED`, `NOT_FOUND`,
-`UPSTREAM_ERROR`, `VALIDATION_ERROR`, `CACHE_ERROR`, `SYNC_ERROR`
-(M3).
-
-## M3 Local Cache & Sync (v0.4.0)
-
-M3 adds a durable SQLite cache at `~/.whoop-mcp-server/whoop.db`
-(override with `WHOOP_DB_PATH`). One table per WHOOP resource plus a
-`sync_runs` audit table. The file is created with `chmod 600` — treat
-it as sensitive as `tokens.json`; it contains your raw physiological
-records.
-
-**Sync model.** Call `sync_whoop()` once per session (or whenever you
-know new WHOOP data exists) to refresh the cache. By default it runs
-incrementally: the per-resource cursor is the `MAX(updated_at)` of the
-stored rows; a fresh DB falls back to the last 90 days.
-
-```
-sync_whoop(full=False, since=None, resources=None)
-```
-
-- `full=True` → pull from 2010-01-01 for every resource.
-- `since="2026-01-01"` → override the cursor for list resources.
-- `resources=["cycles","recoveries"]` → subset.
-
-Returns a per-resource status dict with `records_fetched`,
-`records_upserted`, and `cursor_after`. Overall `status` is
-`success` / `partial` / `error`; `partial` means some resources
-synced and others failed.
-
-**Cache-first reads.** Every list/get tool takes a `fresh: bool`
-argument (default `False`). With `fresh=False`, the tool reads
-directly from SQLite — no HTTP call. An empty-window miss transparently
-triggers a targeted sync, upserts, and re-reads. Pass `fresh=True` to
-always hit WHOOP and write-through to the cache.
-
-**MCP resources.** The cache is also exposed as read-only MCP
-resources so Claude can browse date slices without invoking a tool:
+For Claude Desktop, add the equivalent entry to
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS),
+pointing `command` at the venv Python and `args` at `src/whoop_mcp_server.py`.
+See [docs/INSTALLATION.md](./docs/INSTALLATION.md) for per-OS paths and
+[docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) for common issues.
+
+## Quick start
+
+Once the server is registered, try these prompts:
+
+1. **Sync the cache.** "Sync my WHOOP data from the last 30 days."
+   Claude calls `sync_whoop()` and reports per-resource counts.
+2. **Inspect a day.** "Give me yesterday's WHOOP daily summary."
+   Claude calls `get_whoop_daily_summary(date="YYYY-MM-DD")` and shows a
+   joined cycle + recovery + primary sleep + workouts record.
+3. **Export.** "Export all my cached workouts to `~/whoop-workouts.csv`."
+   Claude calls `export_whoop(kind="workouts", format="csv", path="...")`.
+
+## Tool catalog
+
+17 tools. All list tools accept `start` / `end` as ISO-8601 and auto-paginate.
+Every read tool takes `fresh: bool = False` — pass `True` to bypass the
+cache and hit the WHOOP API, write-through to cache, and return the live
+response. Errors are returned as a structured `{"error": {...}}` envelope;
+tools never raise.
+
+| Tool | What it does | Key parameters |
+|------|--------------|----------------|
+| `get_whoop_auth_status` | Report OAuth token status. Call first if other tools return `AUTH_FAILED`. | — |
+| `get_whoop_profile` | Authenticated user's WHOOP profile (name, email). | `fresh` |
+| `get_whoop_body_measurement` | Latest body measurements: height, weight, max HR. | `fresh` |
+| `list_whoop_cycles` | Physiological cycles in a time window. | `start`, `end`, `limit`, `fresh` |
+| `get_whoop_cycle` | One cycle by integer ID. | `cycle_id`, `fresh` |
+| `get_whoop_cycle_sleep` | Sleep record tied to a given cycle. | `cycle_id`, `fresh` |
+| `get_whoop_cycle_recovery` | Recovery record tied to a given cycle. | `cycle_id`, `fresh` |
+| `list_whoop_recoveries` | Recoveries (HRV / RHR / recovery score) in a window. | `start`, `end`, `limit`, `fresh` |
+| `list_whoop_sleeps` | Sleep activities incl. naps in a window. | `start`, `end`, `limit`, `fresh` |
+| `get_whoop_sleep` | One sleep activity by UUID. | `sleep_id`, `fresh` |
+| `list_whoop_workouts` | Workouts with zone durations (seconds). | `start`, `end`, `limit`, `fresh` |
+| `get_whoop_workout` | One workout by UUID. | `workout_id`, `fresh` |
+| `get_whoop_daily_summary` | Joined cycle + recovery + primary sleep + workouts for a UTC date. | `date` |
+| `sync_whoop` | Refresh cache from WHOOP API. Idempotent, incremental by default. | `full`, `since`, `resources` |
+| `get_whoop_events` | Chronological "what's new" feed across cached resources. | `since`, `until`, `resources`, `limit` |
+| `export_whoop` | Dump cached records to CSV / JSONL / Parquet. | `kind`, `format`, `path`, `start`, `end`, `overwrite` |
+| `health_check` | Composite status (auth, API, cache, schema). Never raises. | `live` |
+
+Error codes: `AUTH_FAILED`, `RATE_LIMITED`, `NOT_FOUND`, `UPSTREAM_ERROR`,
+`VALIDATION_ERROR`, `CACHE_ERROR`, `CACHE_EMPTY`, `FILE_EXISTS`,
+`EXPORT_ERROR`, `SYNC_ERROR`.
+
+## MCP resources
+
+The cache is also exposed as read-only MCP resources, so the client can
+browse date slices without invoking a tool.
 
 | URI | Content |
 |-----|---------|
-| `whoop://db/cycles/{start}/{end}` | JSON array of cached cycles in `[start, end)` (dates are `YYYY-MM-DD`). |
+| `whoop://db/cycles/{start}/{end}` | Cached cycles in `[start, end)` (dates `YYYY-MM-DD`). |
 | `whoop://db/recoveries/{start}/{end}` | Cached recoveries. |
 | `whoop://db/sleeps/{start}/{end}` | Cached sleeps (including naps). |
 | `whoop://db/workouts/{start}/{end}` | Cached workouts. |
 | `whoop://db/profile` | Latest profile snapshot. |
 | `whoop://db/body_measurement` | Latest body_measurement snapshot. |
-| `whoop://db/sync_runs/{limit}` | Most recent audit rows (up to `limit`). |
+| `whoop://db/sync_runs/{limit}` | Most recent sync audit rows. |
+| `whoop://db/events/{since}` | Event feed since `since`, `until` = now. |
+| `whoop://db/events/{since}/{until}` | Event feed for explicit window. |
 
-All resources return `application/json`. Bad inputs produce an error
-body with the same `{"error": {"code","message"}}` shape used by
-tools.
+All resources return `application/json`. Bad inputs return the same
+`{"error": {"code","message"}}` envelope used by tools.
 
-## M4 Exports (v0.5.0)
+## Data model
 
-M4 adds `export_whoop`, a pure data-layer tool that dumps flat cached
-records to disk. It never hits the WHOOP API — run `sync_whoop()` first
-to populate the cache. Supported formats are CSV (RFC 4180, header row
-alphabetically sorted, nested values JSON-encoded), JSONL (one record
-per line, sorted keys for determinism), and Parquet (pyarrow, `snappy`
-compression).
+Responses are **flattened**: the WHOOP `score` wrapper is lifted, milliseconds
+become seconds (`*_seconds`, 1 decimal), kilojoules become calories
+(`calories`, rounded int), heart-rate keys are renamed to `avg_hr_bpm` /
+`max_hr_bpm`, and sleep stages are named `deep_sleep_seconds`,
+`rem_sleep_seconds`, `light_sleep_seconds`, `awake_seconds`,
+`in_bed_seconds`. Raw `user_id`, `v1_id`, and per-record `created_at` are
+dropped.
 
-```
-export_whoop(kind, format, path, start=None, end=None, overwrite=False)
-```
+**`score_state` convention.** WHOOP scores are not always computed. When
+`score_state != "SCORED"` (e.g. `PENDING_SCORE`, `UNSCORABLE`) every
+derived score field is `null` and the top-level `score_state` is preserved
+so callers know why.
 
-- `kind`: `cycles` | `recoveries` | `sleeps` | `workouts` | `all`
-- `format`: `csv` | `jsonl` | `parquet`
-- `path`: output file, or output directory for `kind='all'`. Parent is
-  created if missing.
-- `start` / `end`: inclusive `YYYY-MM-DD` bounds on the primary date.
-  Defaults span the whole cache.
-- `overwrite`: if `False` (default) and the destination has content,
-  returns `FILE_EXISTS`. `True` replaces silently.
+One flattened record per resource:
 
-For `kind='all'` the tool writes `cycles.*`, `recoveries.*`, `sleeps.*`,
-`workouts.*`, `body_measurements.*`, and `profile_snapshots.*` into the
-given directory. An empty date window still yields a file (header-only
-CSV / empty JSONL / empty Parquet) so downstream tooling sees a
-consistent artifact.
-
-Error codes: `VALIDATION_ERROR`, `CACHE_EMPTY` (run `sync_whoop` first),
-`FILE_EXISTS`, `EXPORT_ERROR`.
-
-Exports contain your raw fitness data in flat JSON shape — no tokens,
-no raw API responses. Write them to a secure location.
-
-## M5 Event feed (v0.6.0)
-
-M5 adds `get_whoop_events`, a chronological "what's new" feed across all
-cached resources. Pure cache read — no WHOOP API calls from this path.
-Run `sync_whoop()` first to pick up upstream changes.
-
-```
-get_whoop_events(since, until=None, resources=None, limit=500)
+```json
+// Cycle
+{
+  "id": 123456,
+  "start": "2026-04-20T04:00:00.000Z",
+  "end": "2026-04-21T04:00:00.000Z",
+  "timezone_offset": "+00:00",
+  "score_state": "SCORED",
+  "strain": 12.4,
+  "avg_hr_bpm": 62,
+  "max_hr_bpm": 168,
+  "calories": 2810
+}
 ```
 
-- `since`: ISO-8601 timestamp, strict lower bound on `updated_at`.
-- `until`: ISO-8601 timestamp, strict upper bound. Defaults to now UTC.
-- `resources`: subset of `["cycles","recoveries","sleeps","workouts",
-  "body_measurement","profile"]`. `None` means all.
-- `limit`: cap on total events returned. Must be in `[1, 5000]`.
+```json
+// Recovery
+{
+  "cycle_id": 123456,
+  "sleep_id": "bb68db7b-...",
+  "score_state": "SCORED",
+  "recovery_score": 74,
+  "resting_heart_rate_bpm": 48,
+  "hrv_rmssd_ms": 87.3,
+  "spo2_pct": 97.4,
+  "skin_temp_c": 33.1,
+  "user_calibrating": false
+}
+```
 
-The window is half-open — `updated_at > since AND updated_at < until`.
-The "since" bound is strict so callers can feed a returned `next_cursor`
-back in as the next `since` without re-seeing that row. Events are
-sorted by `updated_at` ascending with `resource` as the tiebreaker.
+```json
+// Sleep
+{
+  "id": "bb68db7b-...",
+  "cycle_id": 123456,
+  "start": "2026-04-20T03:10:00.000Z",
+  "end": "2026-04-20T10:42:00.000Z",
+  "nap": false,
+  "score_state": "SCORED",
+  "sleep_performance_pct": 88.0,
+  "in_bed_seconds": 27120.0,
+  "light_sleep_seconds": 12540.0,
+  "rem_sleep_seconds": 5280.0,
+  "deep_sleep_seconds": 6840.0,
+  "awake_seconds": 1080.0
+}
+```
 
-Each event wraps a flat record with a type tag and change timestamp:
+```json
+// Workout
+{
+  "id": "a91f...",
+  "start": "2026-04-20T17:00:00.000Z",
+  "end": "2026-04-20T17:48:00.000Z",
+  "sport_name": "Running",
+  "score_state": "SCORED",
+  "strain": 9.3,
+  "avg_hr_bpm": 142,
+  "max_hr_bpm": 176,
+  "calories": 511,
+  "distance_meter": 8030.0,
+  "zone_durations_seconds": {
+    "zone_zero": 0.0, "zone_one": 120.0, "zone_two": 900.0,
+    "zone_three": 1440.0, "zone_four": 420.0, "zone_five": 0.0
+  }
+}
+```
+
+## Sync model
+
+- **Cache-first reads.** Every list/get tool reads from SQLite by default.
+  An empty window transparently triggers a targeted sync and re-reads.
+- **`fresh=True`** bypasses the cache, hits the WHOOP API, write-throughs
+  the result into the cache, and returns the live response.
+- **Incremental sync** uses `MAX(updated_at)` per resource as the cursor.
+  A fresh DB falls back to the last 90 days. `sync_whoop(full=True)` pulls
+  from 2010-01-01 for every resource (do this once on a brand-new cache).
+- **Idempotent.** Re-running `sync_whoop` with no new upstream data is a
+  no-op. Combined with snapshot hash dedupe (below), this means the event
+  feed stays quiet.
+- **Snapshot hash dedupe.** `profile` and `body_measurement` are singleton
+  snapshots. Before writing, the server compares SHA-256 of the canonical
+  raw payload against the stored blob. Byte-identical payloads do not
+  advance `updated_at`, so no spurious events are generated.
+
+## Event feed
+
+`get_whoop_events(since, until=None, resources=None, limit=500)` is a
+chronological feed across all cached resources — pure cache read, no API
+calls. The window is **half-open**: `updated_at > since AND updated_at < until`.
+The strict `since` bound means you can feed a returned cursor back in as
+the next `since` without re-seeing a row.
+
+Each event wraps a flat record:
 
 ```json
 {"resource": "sleeps",
  "id": "bb68db7b-...",
  "updated_at": "2026-04-20T14:12:33.123Z",
- "record": { <full flat_json> }}
+ "record": { "...flat sleep..." }}
 ```
 
-Return shape:
+Response:
 
 ```json
 {"status": "success", "count": 17,
  "since": "...", "until": "...",
  "events": [...],
- "next_cursor": null | "<iso>"}
+ "next_cursor": null | "<opaque-base64>"}
 ```
 
-If more events exist than `limit`, `next_cursor` is set to the
-`updated_at` of the last returned event so the caller can paginate by
-passing that value back as `since`. Otherwise `next_cursor` is `null`.
+`next_cursor` is an **opaque** base64 encoding of
+`updated_at|resource|id` for the last returned event. Pass it back as
+`since` to continue. The full triple is used as a tie-broken lower bound,
+so events sharing an `updated_at` are never skipped at a pagination
+boundary. Plain ISO-8601 strings as `since` still work (M5 compat).
 
-Snapshot resources (`body_measurement`, `profile`) contribute their
-single "current" row when its stored `updated_at` falls in the window.
+Also exposed as MCP resources — see the [MCP resources](#mcp-resources)
+table above.
 
-Error codes: `VALIDATION_ERROR` (bad `since`/`until`, unknown resource,
-`limit` out of range), `CACHE_ERROR` (store failure). Tool never raises.
+## Exports
 
-Also available as MCP resources:
+`export_whoop(kind, format, path, start=None, end=None, overwrite=False)`
+writes flat cached records to disk. Pure data layer — never hits the API.
+Run `sync_whoop()` first.
 
-- `whoop://db/events/{since}` — until defaults to now UTC
-- `whoop://db/events/{since}/{until}` — explicit window
+- **`kind`**: `cycles` | `recoveries` | `sleeps` | `workouts` | `all`.
+  `"all"` writes one file per resource (`cycles.*`, `recoveries.*`, …)
+  into the given directory.
+- **`format`**: `csv` (RFC 4180, alphabetically sorted header, nested
+  values JSON-encoded), `jsonl` (one record per line, sorted keys), or
+  `parquet` (pyarrow, snappy).
+- **`overwrite`**: default `False`. If the destination has content,
+  returns `FILE_EXISTS`. `True` replaces silently.
 
-## M6 Hardening (v0.7.0)
+An empty window still yields a file (header-only CSV / empty JSONL /
+empty Parquet) so downstream tooling sees a consistent artifact.
 
-M6 is a reliability + observability pass. No new features — just
-correctness and operability improvements.
+## Operations
 
-### `health_check` tool
+- **Logs.** Stderr (always, structured JSON) plus a rotating file at
+  `~/.whoop-mcp-server/logs/whoop-mcp.log` (~1 MB per file, 5 backups).
+  Env overrides: `WHOOP_LOG_LEVEL` (default `INFO`), `WHOOP_LOG_FILE`
+  (path; empty string disables the file handler), `WHOOP_LOG_JSON`
+  (default `true`).
+- **`health_check(live=True)`** returns a dict with five component
+  checks (`auth`, `api_reachable`, `cache_readable`, `cache_writable`,
+  `schema_version`) plus an overall verdict `healthy | degraded |
+  unhealthy`. `live=False` skips the network probe.
+- **Token refresh.** Refresh tokens are used automatically when the
+  access token is within 5 minutes of expiry. An async refresh lock
+  prevents stampedes when multiple in-flight requests discover the same
+  expired token. If refresh fails beyond recovery, re-run
+  `python setup_direct_oauth.py`.
+- **Rate limiting.** The client respects `Retry-After` on 429s and
+  retries with exponential backoff. After the retry budget, the call
+  surfaces as `RATE_LIMITED` — tools never raise.
 
+## Security and privacy
+
+Everything runs locally. OAuth tokens are encrypted at rest in
+`~/.whoop-mcp-server/tokens.json` with a key at
+`~/.whoop-mcp-server/.encryption_key`. The SQLite cache file is created
+with mode `0o600`. No third-party services — the only outbound network
+calls are directly to `api.prod.whoop.com`. Logs do **not** include
+tokens, refresh tokens, the client secret, or raw WHOOP response bodies.
+See [PRIVACY.md](./PRIVACY.md) for the complete inventory of what the
+server reads, writes, sends, and logs; and how to delete everything
+(`rm -rf ~/.whoop-mcp-server`).
+
+## Development
+
+```bash
+# Run the full test suite (~175 tests).
+.venv/bin/pytest -q
+
+# Re-record fixtures (live calls, requires creds in env).
+.venv/bin/python tests/record_fixtures.py
+
+# Fresh-install smoke test (clones current HEAD into a tempdir and
+# verifies the install path end-to-end, minus the browser OAuth flow).
+bash scripts/fresh_install_check.sh
 ```
-health_check(live: bool = True) -> dict
-```
 
-Returns a structured status dict with five component checks (`auth`,
-`api_reachable`, `cache_readable`, `cache_writable`, `schema_version`)
-plus an overall `"healthy" | "degraded" | "unhealthy"` verdict. Never
-raises; never emits tokens or PII.
+**Adding a new tool.** Add the implementation under `src/whoop_mcp_server.py`
+with an `@mcp.tool()` decorator, a Pydantic model in `src/whoop_models.py`
+if the response has a new shape, a cache table in `src/whoop_store.py` if
+the resource is persisted, and tests in `tests/`. Keep the error envelope
+(`_error_payload` / `_map_error`) — tools never raise.
 
-Pass `live=False` to skip the single live `/user/profile/basic` probe
-and run cache + auth checks only.
+**Release flow.** Bump `src/__version__.py` (single source of truth) →
+add a new top section to [CHANGELOG.md](./CHANGELOG.md) in
+Keep-a-Changelog format → verify `SERVER_VERSION` in
+`whoop_mcp_server.py` picks up the new value (the `test_version_import`
+test prevents drift) → update `version` in `pyproject.toml` → tag
+`vX.Y.Z` on `main`.
 
-### Composite events cursor
+## Versioning
 
-`get_whoop_events` now returns `next_cursor` as an **opaque** string —
-urlsafe base64 of `updated_at|resource|id` for the last returned event.
-Pass it back as `since` to continue. The feed uses the full triple as a
-tiebroken lower bound, so two events sharing an `updated_at` can't be
-skipped at a pagination boundary.
-
-Back-compat: a plain ISO-8601 string as `since` still works and keeps
-the strict `>` semantics from M5. Garbage strings (neither a cursor nor
-valid ISO) are rejected as `VALIDATION_ERROR`.
-
-### Snapshot change detection
-
-`upsert_snapshot` now compares SHA-256 of the canonical raw payload
-against the stored blob. Byte-identical payloads are no-ops: the row's
-`updated_at` does **not** advance. This keeps the event feed quiet when
-`sync_whoop` runs on unchanged profile / body_measurement data.
-
-### Resource-alias asymmetry
-
-The event feed accepts either the public singular name
-(`body_measurement`, `profile`) or the physical table name
-(`body_measurements`, `profile_snapshots`). Callers should prefer the
-singular public form in tool arguments — the table names are an
-internal detail of the cache layer.
-
-### Fractional-second precision
-
-`updated_at` timestamps in the event feed are compared as strings. WHOOP
-v2 timestamps include fractional-second precision and are all `Z`-suffixed
-UTC — the string ordering coincides with chronological ordering when the
-format is consistent. The cursor round-trips the exact string so no
-rounding can occur across a pagination boundary.
-
-### Structured logging
-
-Logs go to stderr (always) and to a rotating file at
-`~/.whoop-mcp-server/logs/whoop-mcp.log` (`maxBytes=1_000_000`,
-`backupCount=5`). JSON formatter by default. Env:
-
-- `WHOOP_LOG_LEVEL` (default `INFO`)
-- `WHOOP_LOG_FILE` (default path above; empty string disables file)
-- `WHOOP_LOG_JSON` (default `true`)
-
-See [PRIVACY.md](./PRIVACY.md) for what the server does and does not log.
+Current version: **0.7.1** (see `src/__version__.py`). Semantic
+versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
