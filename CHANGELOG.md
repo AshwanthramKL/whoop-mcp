@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-04-22
+### Added
+- **MCP Registry ownership-proof marker** in `README.md`. The registry validates that a `pypi` package's README contains `mcp-name: <namespace>/<server>` to prevent anyone from registering a namespace that points at a PyPI package they don't own. Added an unobtrusive marker at the bottom of the README so `mcp-publisher publish` actually succeeds.
+
+### Fixed
+- **Namespace casing in `server.json`**. Registry's `github-oidc` auth grants permission based on the exact case of the GitHub username (`AshwanthramKL`). First publish attempt returned 403 with `io.github.ashwanthramkl/...` because the name didn't match. Fixed to `io.github.AshwanthramKL/whoop-mcp`.
+
+### Process
+- Re-published wheel + sdist to PyPI so the registry can verify the marker is present on the published package.
+
 ## [0.8.2] - 2026-04-22
 ### Added
 - **`pypi_update_available` component in `health_check`.** MCP servers never auto-update — users who installed last month are running last month's code until they explicitly refresh. The check queries `https://pypi.org/pypi/whoop-mcp/json` with a 3s timeout, compares the installed `SERVER_VERSION` against the latest release, and reports `ok` (up-to-date), `warn` (newer available — includes both versions in the output), or `skipped` (when `live=False` or `WHOOP_UPDATE_CHECK=false`). Five new tests cover up-to-date, newer-available, disabled-by-env, live=False, and pypi-unreachable paths.

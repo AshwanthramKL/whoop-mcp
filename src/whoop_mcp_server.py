@@ -63,7 +63,7 @@ try:
     # Single source of truth: package version.
     from __version__ import __version__ as SERVER_VERSION  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - defensive fallback for odd sys.paths
-    SERVER_VERSION = "0.8.2"
+    SERVER_VERSION = "0.8.3"
 
 # M6: configure structured JSON logging + rotating file handler once at
 # import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
