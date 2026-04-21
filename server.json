@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ashwanthramkl/whoop-mcp",
+  "name": "io.github.AshwanthramKL/whoop-mcp",
   "description": "Read-only WHOOP v2 data for MCP clients, with local SQLite cache and CSV/JSONL/Parquet exports.",
   "repository": {
     "url": "https://github.com/AshwanthramKL/whoop-mcp",
