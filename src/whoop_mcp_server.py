@@ -60,7 +60,7 @@ from whoop_store import WhoopStore
 from whoop_sync import run_sync as _run_sync
 import whoop_export
 
-SERVER_VERSION = "0.5.0"
+SERVER_VERSION = "0.6.0"
 
 logger = logging.getLogger("whoop_mcp_server")
 if not logger.handlers:
@@ -83,7 +83,11 @@ mcp = FastMCP(
         "kcal, HR keys avg_hr_bpm/max_hr_bpm). Errors are a structured "
         "envelope, never raised. Call ``export_whoop`` to dump cached "
         "records to CSV / JSONL / Parquet on disk (requires a prior "
-        "``sync_whoop`` run)."
+        "``sync_whoop`` run). Call ``get_whoop_events(since=...)`` for a "
+        "chronological 'what's new' feed across all cached resources — "
+        "useful for activity feeds and incremental reads. The feed is "
+        "also available as an MCP resource under "
+        "whoop://db/events/{since}[/{until}]."
     ),
 )
 
@@ -903,6 +907,199 @@ def resource_sync_runs(limit: str) -> str:
     except Exception as e:
         return _resource_error("CACHE_ERROR", str(e))
     return json.dumps(rows, default=str)
+
+
+# ---------- Events feed (M5) ----------
+
+
+# Public resource names accepted by get_whoop_events. Includes both
+# record tables and snapshot aliases.
+_EVENT_RESOURCES = (
+    "cycles",
+    "recoveries",
+    "sleeps",
+    "workouts",
+    "body_measurement",
+    "profile",
+)
+
+_EVENT_LIMIT_MAX = 5000
+
+
+def _parse_iso_ts(s: str) -> Optional[datetime]:
+    """Best-effort ISO-8601 parse -> aware UTC datetime. ``None`` on failure."""
+    if not isinstance(s, str) or not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _events_core(
+    *,
+    since: str,
+    until: Optional[str],
+    resources: Optional[List[str]],
+    limit: int,
+) -> Dict[str, Any]:
+    """Shared implementation for the events tool and resource.
+
+    Validates args, queries the store via ``iter_events``, applies limit +
+    pagination cursor, and returns either the success payload or an error
+    envelope. Never raises.
+    """
+    endpoint = "get_whoop_events"
+
+    # Validate since.
+    since_dt = _parse_iso_ts(since) if since else None
+    if since_dt is None:
+        return _error_payload(
+            "VALIDATION_ERROR",
+            "'since' must be a non-empty ISO-8601 timestamp",
+            endpoint,
+        )
+
+    # Validate / default until.
+    if until is None or until == "":
+        until_dt = datetime.now(timezone.utc)
+        until = until_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    else:
+        until_dt = _parse_iso_ts(until)
+        if until_dt is None:
+            return _error_payload(
+                "VALIDATION_ERROR",
+                "'until' must be an ISO-8601 timestamp",
+                endpoint,
+            )
+
+    if until_dt <= since_dt:
+        return _error_payload(
+            "VALIDATION_ERROR",
+            "'until' must be strictly greater than 'since'",
+            endpoint,
+        )
+
+    # Validate limit.
+    try:
+        limit_i = int(limit)
+    except (TypeError, ValueError):
+        return _error_payload(
+            "VALIDATION_ERROR", "'limit' must be an integer in [1, 5000]", endpoint
+        )
+    if limit_i < 1 or limit_i > _EVENT_LIMIT_MAX:
+        return _error_payload(
+            "VALIDATION_ERROR",
+            f"'limit' must be in [1, {_EVENT_LIMIT_MAX}]",
+            endpoint,
+        )
+
+    # Validate + normalize resources.
+    if resources is None:
+        resource_list = list(_EVENT_RESOURCES)
+    else:
+        if not isinstance(resources, (list, tuple)) or not resources:
+            return _error_payload(
+                "VALIDATION_ERROR",
+                "'resources' must be a non-empty list when provided",
+                endpoint,
+            )
+        for r in resources:
+            if r not in _EVENT_RESOURCES:
+                return _error_payload(
+                    "VALIDATION_ERROR",
+                    f"unknown resource {r!r}; allowed: {list(_EVENT_RESOURCES)}",
+                    endpoint,
+                )
+        resource_list = list(resources)
+
+    # Read.
+    try:
+        store = _get_store()
+    except Exception as e:
+        return _error_payload("CACHE_ERROR", f"store init failed: {e}", endpoint)
+
+    try:
+        rows = list(
+            store.iter_events(
+                resources=resource_list,
+                since=since,
+                until=until,
+                limit=limit_i,
+            )
+        )
+    except Exception as e:
+        logger.exception("get_whoop_events: iter_events failed")
+        return _error_payload("CACHE_ERROR", f"{type(e).__name__}: {e}", endpoint)
+
+    # Truncation: iter_events returns up to limit+1 rows. If we got the
+    # extra row, trim to limit and set next_cursor to the updated_at of
+    # the last kept event.
+    if len(rows) > limit_i:
+        events = rows[:limit_i]
+        next_cursor = events[-1]["updated_at"] if events else None
+    else:
+        events = rows
+        next_cursor = None
+
+    return {
+        "status": "success",
+        "count": len(events),
+        "since": since,
+        "until": until,
+        "events": events,
+        "next_cursor": next_cursor,
+    }
+
+
+@mcp.tool()
+async def get_whoop_events(
+    since: str,
+    until: Optional[str] = None,
+    resources: Optional[List[str]] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Returns WHOOP records that changed since a given timestamp, across
+    all cached resources.
+
+    Use for 'what's new' checks or to build activity feeds. Reads from the
+    local cache only — call ``sync_whoop()`` first to pick up upstream
+    changes. No WHOOP API calls are made from this path.
+
+    The window is half-open: ``updated_at > since AND updated_at < until``
+    (strict on both sides). This lets you paginate by passing the returned
+    ``next_cursor`` back as the next ``since`` without re-seeing the
+    cursor row.
+
+    Args:
+        since: ISO-8601 timestamp; strict lower bound on ``updated_at``.
+            Required.
+        until: ISO-8601 timestamp; strict upper bound. Defaults to
+            ``now`` UTC.
+        resources: subset of
+            ``["cycles","recoveries","sleeps","workouts","body_measurement","profile"]``.
+            ``None`` means all.
+        limit: cap on total events returned. Must be in ``[1, 5000]``.
+            Default 500.
+
+    Returns::
+
+        {"status": "success", "count": N, "since": "...", "until": "...",
+         "events": [{"resource": "...", "id": "...",
+                     "updated_at": "...", "record": {...}}, ...],
+         "next_cursor": null | "<iso>"}
+
+    If more events exist than ``limit``, ``next_cursor`` is the
+    ``updated_at`` of the last returned event; pass it as ``since`` on the
+    next call to continue. On validation failure or cache error, returns
+    the standard ``{"error": {...}}`` envelope. Tool never raises.
+    """
+    return _events_core(
+        since=since, until=until, resources=resources, limit=limit
+    )
 
 
 # ---------- Export tool (M4) ----------
