@@ -378,4 +378,54 @@ as `null`. Only when every fetch fails does the tool return an
 
 Errors are returned as `{"error": {"code", "message", "endpoint"}}` —
 tools never raise. Codes: `AUTH_FAILED`, `RATE_LIMITED`, `NOT_FOUND`,
-`UPSTREAM_ERROR`, `VALIDATION_ERROR`.
+`UPSTREAM_ERROR`, `VALIDATION_ERROR`, `CACHE_ERROR`, `SYNC_ERROR`
+(M3).
+
+## M3 Local Cache & Sync (v0.4.0)
+
+M3 adds a durable SQLite cache at `~/.whoop-mcp-server/whoop.db`
+(override with `WHOOP_DB_PATH`). One table per WHOOP resource plus a
+`sync_runs` audit table. The file is created with `chmod 600` — treat
+it as sensitive as `tokens.json`; it contains your raw physiological
+records.
+
+**Sync model.** Call `sync_whoop()` once per session (or whenever you
+know new WHOOP data exists) to refresh the cache. By default it runs
+incrementally: the per-resource cursor is the `MAX(updated_at)` of the
+stored rows; a fresh DB falls back to the last 90 days.
+
+```
+sync_whoop(full=False, since=None, resources=None)
+```
+
+- `full=True` → pull from 2010-01-01 for every resource.
+- `since="2026-01-01"` → override the cursor for list resources.
+- `resources=["cycles","recoveries"]` → subset.
+
+Returns a per-resource status dict with `records_fetched`,
+`records_upserted`, and `cursor_after`. Overall `status` is
+`success` / `partial` / `error`; `partial` means some resources
+synced and others failed.
+
+**Cache-first reads.** Every list/get tool takes a `fresh: bool`
+argument (default `False`). With `fresh=False`, the tool reads
+directly from SQLite — no HTTP call. An empty-window miss transparently
+triggers a targeted sync, upserts, and re-reads. Pass `fresh=True` to
+always hit WHOOP and write-through to the cache.
+
+**MCP resources.** The cache is also exposed as read-only MCP
+resources so Claude can browse date slices without invoking a tool:
+
+| URI | Content |
+|-----|---------|
+| `whoop://db/cycles/{start}/{end}` | JSON array of cached cycles in `[start, end)` (dates are `YYYY-MM-DD`). |
+| `whoop://db/recoveries/{start}/{end}` | Cached recoveries. |
+| `whoop://db/sleeps/{start}/{end}` | Cached sleeps (including naps). |
+| `whoop://db/workouts/{start}/{end}` | Cached workouts. |
+| `whoop://db/profile` | Latest profile snapshot. |
+| `whoop://db/body_measurement` | Latest body_measurement snapshot. |
+| `whoop://db/sync_runs/{limit}` | Most recent audit rows (up to `limit`). |
+
+All resources return `application/json`. Bad inputs produce an error
+body with the same `{"error": {"code","message"}}` shape used by
+tools.

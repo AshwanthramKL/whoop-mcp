@@ -3,6 +3,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Local WHOOP cache (M3)
+# The DB lives at ~/.whoop-mcp-server/whoop.db by default, outside the
+# repo — but guard against stray copies inside the repo.
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
 # C extensions
 *.so
 
