@@ -42,7 +42,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 __all__ = ["WhoopStore", "SCHEMA_VERSION", "RECORD_TABLES", "SNAPSHOT_TABLES"]
 
@@ -350,6 +350,50 @@ class WhoopStore:
             conn = self._connect()
             rows = conn.execute(sql, params).fetchall()
             return [json.loads(r["flat_json"]) for r in rows]
+
+    def iter_records(
+        self,
+        resource: str,
+        start: Optional[str],
+        end: Optional[str],
+    ) -> Iterator[Dict[str, Any]]:
+        """Yield decoded flat_json dicts for a resource in ``[start, end]``.
+
+        Window semantics are **inclusive-inclusive** on the resource's
+        ``start`` column. ``None`` on either side means unbounded. Results
+        are ordered by ``start`` ASC for deterministic exports.
+
+        For snapshot tables (``profile_snapshots``, ``body_measurements``)
+        the window is ignored and the single ``current`` row is yielded if
+        present.
+
+        Uses parameterized SQL exclusively.
+        """
+        if resource in SNAPSHOT_TABLES:
+            snap = self.get_latest_snapshot(resource)
+            if snap is not None:
+                yield snap
+            return
+
+        if resource not in RECORD_TABLES:
+            raise ValueError(f"iter_records: unknown resource {resource!r}")
+
+        clauses: List[str] = []
+        params: List[Any] = []
+        if start is not None:
+            clauses.append("start >= ?")
+            params.append(start)
+        if end is not None:
+            clauses.append("start <= ?")
+            params.append(end)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT flat_json FROM {resource}{where} ORDER BY start ASC"
+
+        with self._lock:
+            conn = self._connect()
+            rows = conn.execute(sql, params).fetchall()
+        for r in rows:
+            yield json.loads(r["flat_json"])
 
     def query_by_cycle_id(self, table: str, *, cycle_id: int) -> List[Dict[str, Any]]:
         if table not in CYCLE_CHILD_TABLES:
