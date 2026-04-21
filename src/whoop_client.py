@@ -118,7 +118,7 @@ def _coerce_datetime(value: Union[str, datetime, None], field: str, endpoint: st
     # Validate it actually parses. Accept trailing Z by swapping to +00:00.
     parseable = value.replace("Z", "+00:00")
     try:
-        datetime.fromisoformat(parseable)
+        parsed = datetime.fromisoformat(parseable)
     except ValueError as e:
         raise ValidationError(
             "VALIDATION_ERROR",
@@ -126,6 +126,9 @@ def _coerce_datetime(value: Union[str, datetime, None], field: str, endpoint: st
             f"{field} is not a valid ISO-8601 datetime: {e}",
             endpoint,
         ) from e
+    # WHOOP v2 rejects date-only (YYYY-MM-DD) with 404. Normalize to full ISO-8601.
+    if len(value) == 10 and parsed.tzinfo is None:
+        return parsed.strftime("%Y-%m-%dT00:00:00.000Z")
     return value
 
 

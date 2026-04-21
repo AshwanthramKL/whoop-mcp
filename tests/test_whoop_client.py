@@ -358,6 +358,21 @@ async def test_list_cycles_passes_date_params():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_date_only_params_normalized_to_full_iso():
+    """Regression: WHOOP v2 /cycle returns 404 for YYYY-MM-DD; client must normalize."""
+    route = respx.get(f"{V2}/cycle").mock(
+        return_value=httpx.Response(200, json={"records": [], "next_token": None})
+    )
+    client = WhoopClient()
+    await client.list_cycles(start="2026-04-19", end="2026-04-21")
+    assert route.called
+    qp = dict(route.calls.last.request.url.params)
+    assert qp["start"] == "2026-04-19T00:00:00.000Z"
+    assert qp["end"] == "2026-04-21T00:00:00.000Z"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_cycles_authorization_header_sent():
     route = respx.get(f"{V2}/cycle").mock(
         return_value=httpx.Response(200, json={"records": [], "next_token": None})
