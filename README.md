@@ -517,3 +517,69 @@ Also available as MCP resources:
 
 - `whoop://db/events/{since}` — until defaults to now UTC
 - `whoop://db/events/{since}/{until}` — explicit window
+
+## M6 Hardening (v0.7.0)
+
+M6 is a reliability + observability pass. No new features — just
+correctness and operability improvements.
+
+### `health_check` tool
+
+```
+health_check(live: bool = True) -> dict
+```
+
+Returns a structured status dict with five component checks (`auth`,
+`api_reachable`, `cache_readable`, `cache_writable`, `schema_version`)
+plus an overall `"healthy" | "degraded" | "unhealthy"` verdict. Never
+raises; never emits tokens or PII.
+
+Pass `live=False` to skip the single live `/user/profile/basic` probe
+and run cache + auth checks only.
+
+### Composite events cursor
+
+`get_whoop_events` now returns `next_cursor` as an **opaque** string —
+urlsafe base64 of `updated_at|resource|id` for the last returned event.
+Pass it back as `since` to continue. The feed uses the full triple as a
+tiebroken lower bound, so two events sharing an `updated_at` can't be
+skipped at a pagination boundary.
+
+Back-compat: a plain ISO-8601 string as `since` still works and keeps
+the strict `>` semantics from M5. Garbage strings (neither a cursor nor
+valid ISO) are rejected as `VALIDATION_ERROR`.
+
+### Snapshot change detection
+
+`upsert_snapshot` now compares SHA-256 of the canonical raw payload
+against the stored blob. Byte-identical payloads are no-ops: the row's
+`updated_at` does **not** advance. This keeps the event feed quiet when
+`sync_whoop` runs on unchanged profile / body_measurement data.
+
+### Resource-alias asymmetry
+
+The event feed accepts either the public singular name
+(`body_measurement`, `profile`) or the physical table name
+(`body_measurements`, `profile_snapshots`). Callers should prefer the
+singular public form in tool arguments — the table names are an
+internal detail of the cache layer.
+
+### Fractional-second precision
+
+`updated_at` timestamps in the event feed are compared as strings. WHOOP
+v2 timestamps include fractional-second precision and are all `Z`-suffixed
+UTC — the string ordering coincides with chronological ordering when the
+format is consistent. The cursor round-trips the exact string so no
+rounding can occur across a pagination boundary.
+
+### Structured logging
+
+Logs go to stderr (always) and to a rotating file at
+`~/.whoop-mcp-server/logs/whoop-mcp.log` (`maxBytes=1_000_000`,
+`backupCount=5`). JSON formatter by default. Env:
+
+- `WHOOP_LOG_LEVEL` (default `INFO`)
+- `WHOOP_LOG_FILE` (default path above; empty string disables file)
+- `WHOOP_LOG_JSON` (default `true`)
+
+See [PRIVACY.md](./PRIVACY.md) for what the server does and does not log.

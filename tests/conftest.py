@@ -58,9 +58,9 @@ def whoop_access_token(request, monkeypatch):
     ``test_mcp_tools.py``). Skipped for ``test_auth_manager.py``, which
     exercises the real TokenManager.
     """
-    # Let the auth_manager tests use the real class.
+    # Let the auth_manager and token_rotation tests use the real class.
     test_path = str(request.node.fspath)
-    if "test_auth_manager" in test_path:
+    if "test_auth_manager" in test_path or "test_token_rotation" in test_path:
         yield
         return
 

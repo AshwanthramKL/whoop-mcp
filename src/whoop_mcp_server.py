@@ -29,12 +29,13 @@ sensitive as ``tokens.json``. The file is created with ``chmod 600``.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from mcp.server.fastmcp import FastMCP
 
@@ -56,18 +57,21 @@ from whoop_models import (
     Workout,
     flatten_list,
 )
-from whoop_store import WhoopStore
+from whoop_store import WhoopStore, SCHEMA_VERSION, RECORD_TABLES, SNAPSHOT_TABLES
 from whoop_sync import run_sync as _run_sync
 import whoop_export
+import whoop_logging
 
-SERVER_VERSION = "0.6.0"
+SERVER_VERSION = "0.7.0"
 
+# M6: configure structured JSON logging + rotating file handler once at
+# import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
+try:
+    whoop_logging.setup()
+except Exception:
+    # Never let logging setup break module import.
+    pass
 logger = logging.getLogger("whoop_mcp_server")
-if not logger.handlers:
-    _h = logging.StreamHandler(sys.stderr)
-    _h.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    logger.addHandler(_h)
-    logger.setLevel(logging.INFO)
 
 mcp = FastMCP(
     "whoop",
@@ -85,9 +89,13 @@ mcp = FastMCP(
         "records to CSV / JSONL / Parquet on disk (requires a prior "
         "``sync_whoop`` run). Call ``get_whoop_events(since=...)`` for a "
         "chronological 'what's new' feed across all cached resources — "
-        "useful for activity feeds and incremental reads. The feed is "
-        "also available as an MCP resource under "
-        "whoop://db/events/{since}[/{until}]."
+        "useful for activity feeds and incremental reads. The feed "
+        "returns an opaque composite cursor in ``next_cursor`` — pass "
+        "it back as ``since`` to paginate without skipping ties. Call "
+        "``health_check`` before long operations or when diagnosing "
+        "issues; a fast local-only mode is available via ``live=False``. "
+        "Logs are structured JSON on stderr plus a rotating file at "
+        "~/.whoop-mcp-server/logs/whoop-mcp.log."
     ),
 )
 
@@ -939,6 +947,51 @@ def _parse_iso_ts(s: str) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+# ---------- composite events cursor ----------
+#
+# Cursor encodes the last-returned event as urlsafe-base64 of the literal
+# string ``<updated_at>|<resource>|<id>``. Opaque to callers; cheap to
+# round-trip. A malformed cursor is rejected at tool-boundary as
+# VALIDATION_ERROR. Plain ISO-8601 ``since`` values still work for
+# back-compat: the encoder only produces cursors; the decoder treats
+# anything that fails base64 + split as "not a cursor".
+
+_CURSOR_SEP = "|"
+
+
+def _encode_events_cursor(updated_at: str, resource: str, id_: str) -> str:
+    raw = f"{updated_at}{_CURSOR_SEP}{resource}{_CURSOR_SEP}{id_}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_events_cursor(s: str) -> Optional[Tuple[str, str, str]]:
+    """Return ``(updated_at, resource, id)`` or ``None`` if ``s`` is not a cursor.
+
+    "Not a cursor" includes: not base64, decoded string doesn't contain
+    two separators, or decoded updated_at doesn't parse as ISO-8601.
+    """
+    if not isinstance(s, str) or not s:
+        return None
+    # Heuristic: a valid ISO string contains ``:`` which urlsafe-base64
+    # does not. If it starts with a digit and has a ``-`` / ``:`` pattern,
+    # treat as ISO and don't try base64.
+    if ":" in s or s.endswith("Z"):
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(s.encode("ascii") + b"==").decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    parts = decoded.split(_CURSOR_SEP)
+    if len(parts) != 3:
+        return None
+    updated_at, resource, id_ = parts
+    if _parse_iso_ts(updated_at) is None:
+        return None
+    if not resource or not id_:
+        return None
+    return updated_at, resource, id_
+
+
 def _events_core(
     *,
     since: str,
@@ -954,12 +1007,22 @@ def _events_core(
     """
     endpoint = "get_whoop_events"
 
-    # Validate since.
-    since_dt = _parse_iso_ts(since) if since else None
+    # Validate since. Accepts either:
+    #  - plain ISO-8601 timestamp (back-compat, strict >)
+    #  - opaque cursor from a previous next_cursor (composite tiebreaker)
+    since_cursor = _decode_events_cursor(since) if since else None
+    if since_cursor is not None:
+        since_for_sql = since_cursor[0]
+        since_dt = _parse_iso_ts(since_for_sql)
+    else:
+        since_dt = _parse_iso_ts(since) if since else None
+        since_for_sql = since
+
     if since_dt is None:
+        # Empty / garbage / anything else.
         return _error_payload(
             "VALIDATION_ERROR",
-            "'since' must be a non-empty ISO-8601 timestamp",
+            "'since' must be a non-empty ISO-8601 timestamp or opaque events cursor",
             endpoint,
         )
 
@@ -1026,9 +1089,10 @@ def _events_core(
         rows = list(
             store.iter_events(
                 resources=resource_list,
-                since=since,
+                since=since_for_sql,
                 until=until,
                 limit=limit_i,
+                since_cursor=since_cursor,
             )
         )
     except Exception as e:
@@ -1036,11 +1100,18 @@ def _events_core(
         return _error_payload("CACHE_ERROR", f"{type(e).__name__}: {e}", endpoint)
 
     # Truncation: iter_events returns up to limit+1 rows. If we got the
-    # extra row, trim to limit and set next_cursor to the updated_at of
-    # the last kept event.
+    # extra row, trim to limit and set next_cursor to the composite cursor
+    # of the last kept event (so a later call with since=cursor continues
+    # correctly across ties).
     if len(rows) > limit_i:
         events = rows[:limit_i]
-        next_cursor = events[-1]["updated_at"] if events else None
+        if events:
+            last = events[-1]
+            next_cursor = _encode_events_cursor(
+                str(last["updated_at"]), str(last["resource"]), str(last["id"])
+            )
+        else:
+            next_cursor = None
     else:
         events = rows
         next_cursor = None
@@ -1092,10 +1163,17 @@ async def get_whoop_events(
                      "updated_at": "...", "record": {...}}, ...],
          "next_cursor": null | "<iso>"}
 
-    If more events exist than ``limit``, ``next_cursor`` is the
-    ``updated_at`` of the last returned event; pass it as ``since`` on the
-    next call to continue. On validation failure or cache error, returns
-    the standard ``{"error": {...}}`` envelope. Tool never raises.
+    If more events exist than ``limit``, ``next_cursor`` is an **opaque
+    composite cursor** encoded as urlsafe base64 of
+    ``<updated_at>|<resource>|<id>`` — the triple of the last returned
+    event. Pass it as ``since`` on the next call to continue; the feed
+    uses it as a tiebroken lower bound so no two events with the same
+    ``updated_at`` are skipped at a pagination boundary.
+
+    Back-compat: ``since`` still accepts a plain ISO-8601 string (strict
+    ``>`` lower bound). Garbage strings are rejected as VALIDATION_ERROR.
+    On validation failure or cache error, returns the standard
+    ``{"error": {...}}`` envelope. Tool never raises.
     """
     return _events_core(
         since=since, until=until, resources=resources, limit=limit
@@ -1207,6 +1285,205 @@ async def export_whoop(
     except Exception as e:
         logger.exception("export_whoop tool failed")
         return _error_payload("EXPORT_ERROR", f"{type(e).__name__}: {e}", "export_whoop")
+
+
+# ---------- Health check (M6) ----------
+
+
+def _component(status: str, detail: str, **extra: Any) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"status": status, "detail": detail}
+    out.update(extra)
+    return out
+
+
+def _rank(status: str) -> int:
+    # Higher = worse.
+    return {"ok": 0, "skipped": 0, "warn": 1, "fail": 2}.get(status, 2)
+
+
+async def _check_auth() -> Dict[str, Any]:
+    import time as _time
+    t0 = _time.perf_counter()
+    try:
+        info = _get_client().get_auth_status()
+    except Exception as e:
+        return _component("fail", f"get_auth_status raised: {type(e).__name__}")
+    latency_ms = int((_time.perf_counter() - t0) * 1000)
+    status_str = info.get("status") if isinstance(info, dict) else None
+    if status_str == "valid":
+        # Intentionally omit the raw timestamp (PII-adjacent); summarize.
+        return _component(
+            "ok",
+            "token valid",
+            latency_ms=latency_ms,
+            has_refresh_token=bool(info.get("has_refresh_token")),
+        )
+    if status_str == "expired":
+        if info.get("has_refresh_token"):
+            return _component(
+                "warn",
+                "token expired; refresh token available",
+                latency_ms=latency_ms,
+            )
+        return _component("fail", "token expired; no refresh token", latency_ms=latency_ms)
+    if status_str == "no_tokens":
+        return _component("fail", "no tokens on file", latency_ms=latency_ms)
+    return _component("warn", f"unknown auth status: {status_str!r}", latency_ms=latency_ms)
+
+
+async def _check_api(live: bool) -> Dict[str, Any]:
+    if not live:
+        return _component("skipped", "live=False; skipped network call")
+    import time as _time
+    import httpx as _httpx
+
+    t0 = _time.perf_counter()
+    try:
+        client = _get_client()
+        # Short timeout: the goal is liveness, not data.
+        resp = await asyncio.wait_for(client.get_profile(), timeout=5.0)
+    except asyncio.TimeoutError:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", "timeout after 5s", latency_ms=latency_ms)
+    except AuthError:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", "auth failed (401)", latency_ms=latency_ms)
+    except WhoopAPIError as e:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", f"{e.code}: {e.message[:120]}", latency_ms=latency_ms)
+    except _httpx.HTTPError as e:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", f"transport: {type(e).__name__}", latency_ms=latency_ms)
+    except Exception as e:
+        latency_ms = int((_time.perf_counter() - t0) * 1000)
+        return _component("fail", f"{type(e).__name__}", latency_ms=latency_ms)
+    latency_ms = int((_time.perf_counter() - t0) * 1000)
+    return _component("ok", "reachable", latency_ms=latency_ms)
+
+
+def _check_cache_readable() -> Dict[str, Any]:
+    try:
+        store = _get_store()
+    except Exception as e:
+        return _component("fail", f"store init failed: {type(e).__name__}", rows_total=0)
+    total = 0
+    try:
+        for table in list(RECORD_TABLES) + list(SNAPSHOT_TABLES):
+            total += store.count(table)
+    except Exception as e:
+        return _component("fail", f"count failed: {type(e).__name__}", rows_total=0)
+    return _component("ok", f"cache has {total} rows across record + snapshot tables", rows_total=total)
+
+
+def _check_cache_writable() -> Dict[str, Any]:
+    try:
+        store = _get_store()
+        conn = store._connect()
+        with conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS _health ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL)"
+            )
+            cur = conn.execute(
+                "INSERT INTO _health (ts) VALUES (?)",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            rowid = cur.lastrowid
+            conn.execute("DELETE FROM _health WHERE id = ?", (rowid,))
+    except Exception as e:
+        return _component("fail", f"{type(e).__name__}: {e}")
+    return _component("ok", "sentinel write + delete succeeded")
+
+
+def _check_schema_version() -> Dict[str, Any]:
+    try:
+        store = _get_store()
+        conn = store._connect()
+        actual = conn.execute("PRAGMA user_version").fetchone()[0]
+    except Exception as e:
+        return _component("fail", f"{type(e).__name__}")
+    if actual == SCHEMA_VERSION:
+        return _component(
+            "ok", f"user_version={actual} expected={SCHEMA_VERSION}"
+        )
+    return _component(
+        "warn",
+        f"user_version={actual} expected={SCHEMA_VERSION}; migration may be needed",
+    )
+
+
+@mcp.tool()
+async def health_check(live: bool = True) -> Dict[str, Any]:
+    """Run server health checks and return a structured status dict.
+
+    Run before long operations or when diagnosing issues; fast local-only
+    mode available via ``live=False`` (skips the WHOOP API round-trip).
+
+    Returns::
+
+        {
+          "status": "healthy" | "degraded" | "unhealthy",
+          "checks": {
+            "auth":           {"status": "ok|warn|fail", "detail": "...", ...},
+            "api_reachable":  {"status": "ok|warn|fail|skipped", "detail": "...", ...},
+            "cache_readable": {"status": "ok|warn|fail", "detail": "...", "rows_total": N},
+            "cache_writable": {"status": "ok|warn|fail", "detail": "..."},
+            "schema_version": {"status": "ok|warn|fail", "detail": "user_version=..."}
+          },
+          "server_version": "...",
+          "timestamp": "<utc iso>"
+        }
+
+    Never raises. Never emits tokens or PII.
+    """
+    checks: Dict[str, Dict[str, Any]] = {}
+    try:
+        checks["auth"] = await _check_auth()
+    except Exception as e:  # pragma: no cover
+        checks["auth"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["api_reachable"] = await _check_api(live=live)
+    except Exception as e:  # pragma: no cover
+        checks["api_reachable"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["cache_readable"] = _check_cache_readable()
+    except Exception as e:
+        checks["cache_readable"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["cache_writable"] = _check_cache_writable()
+    except Exception as e:
+        checks["cache_writable"] = _component("fail", f"{type(e).__name__}")
+    try:
+        checks["schema_version"] = _check_schema_version()
+    except Exception as e:
+        checks["schema_version"] = _component("fail", f"{type(e).__name__}")
+
+    worst = max(_rank(c["status"]) for c in checks.values())
+    if worst == 0:
+        overall = "healthy"
+    elif worst == 1:
+        overall = "degraded"
+    else:
+        overall = "unhealthy"
+
+    result = {
+        "status": overall,
+        "checks": checks,
+        "server_version": SERVER_VERSION,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+    }
+    try:
+        logger.info(
+            "health_check",
+            extra={
+                "event": "health_check",
+                "overall": overall,
+                "checks": {k: v["status"] for k, v in checks.items()},
+            },
+        )
+    except Exception:
+        pass
+    return result
 
 
 # ---------- Entry point ----------
