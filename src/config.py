@@ -4,14 +4,20 @@ Configuration for WHOOP MCP Server
 import os
 from typing import Optional
 
-# OAuth application endpoints
-OAUTH_BASE_URL = "https://personal-integrations-462307.uc.r.appspot.com"
-OAUTH_AUTH_URL = f"{OAUTH_BASE_URL}/"
-OAUTH_TOKEN_URL = f"{OAUTH_BASE_URL}/api/get-tokens"
-OAUTH_REFRESH_URL = f"{OAUTH_BASE_URL}/api/refresh-token"
+# Direct WHOOP OAuth 2.0 endpoints (user's own dev app)
+WHOOP_OAUTH_AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
+WHOOP_OAUTH_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
+WHOOP_CLIENT_ID = os.getenv("WHOOP_CLIENT_ID", "")
+WHOOP_CLIENT_SECRET = os.getenv("WHOOP_CLIENT_SECRET", "")
+WHOOP_REDIRECT_URI = os.getenv("WHOOP_REDIRECT_URI", "http://localhost:8000/callback")
+
+# Back-compat aliases (still imported elsewhere, no longer used for the 3rd-party proxy)
+OAUTH_AUTH_URL = WHOOP_OAUTH_AUTH_URL
+OAUTH_TOKEN_URL = WHOOP_OAUTH_TOKEN_URL
+OAUTH_REFRESH_URL = WHOOP_OAUTH_TOKEN_URL
 
 # WHOOP API configuration
-WHOOP_API_BASE = "https://api.prod.whoop.com/developer/v1"
+WHOOP_API_BASE = "https://api.prod.whoop.com/developer/v2"
 WHOOP_SCOPES = [
     "read:profile",
     "read:workout", 
