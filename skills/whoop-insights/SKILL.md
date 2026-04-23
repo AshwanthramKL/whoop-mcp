@@ -57,6 +57,8 @@ mcp__whoop__list_whoop_workouts(start=..., end=..., fresh=False)
 
 If any resource returns an empty list, surface it ("no recoveries scored in the last 30 days — likely because cycles haven't been processed yet"). Don't silently skip.
 
+**Reading timestamps on cycles / sleeps / workouts:** each record has `start_utc` / `end_utc` (canonical, ends in `Z`) and derived `start_local` / `end_local` carrying the record's `timezone_offset`. **Use `*_local` when you talk times-of-day with the user** ("you went to bed at 23:45") — the `_utc` form looks local to a skim-reading eye and will silently be 5.5h off for IST users, 8h off for PST, etc. Keep `*_utc` for numeric math across records (sorting, windowing, pairing a sleep with its next cycle).
+
 ### 4. Compute personal baselines
 
 From the `SCORED` records in the window:

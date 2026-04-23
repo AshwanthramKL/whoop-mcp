@@ -63,7 +63,7 @@ try:
     # Single source of truth: package version.
     from __version__ import __version__ as SERVER_VERSION  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - defensive fallback for odd sys.paths
-    SERVER_VERSION = "0.8.3"
+    SERVER_VERSION = "0.8.4"
 
 # M6: configure structured JSON logging + rotating file handler once at
 # import time. Safe to re-call; ``whoop_logging.setup`` is idempotent.
@@ -663,7 +663,7 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> dict[str, A
         flat_workouts = store.query_range("workouts", start=start_iso, end=end_iso)
 
         chosen = next(
-            (c for c in flat_cycles if _day_of_utc(c.get("start")) == date),
+            (c for c in flat_cycles if _day_of_utc(c.get("start_utc")) == date),
             flat_cycles[0] if flat_cycles else None,
         )
         cycle_flat = chosen
@@ -682,7 +682,7 @@ async def get_whoop_daily_summary(date: str, fresh: bool = False) -> dict[str, A
                 cands.sort(key=lambda f: f.get("in_bed_seconds") or 0, reverse=True)
                 sleep_flat = cands[0]
 
-        workouts_flat = [w for w in flat_workouts if _day_of_utc(w.get("start")) == date]
+        workouts_flat = [w for w in flat_workouts if _day_of_utc(w.get("start_utc")) == date]
 
         score_states = {
             "cycle": cycle_flat["score_state"] if cycle_flat else None,

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whoop-mcp"
-version = "0.8.3"
+version = "0.8.4"
 authors = [
     {name = "Ashwanthram K L", email = "k.l.ashwanthram@gmail.com"}
 ]

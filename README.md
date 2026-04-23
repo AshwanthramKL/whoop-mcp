@@ -15,7 +15,7 @@ All records are mirrored into a local SQLite cache at
 except for the authenticated calls the server itself makes to the WHOOP
 v2 API.
 
-Current version: **0.8.3** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **0.8.4** — see [CHANGELOG.md](./CHANGELOG.md).
 
 > **Pre-1.0 status.** The API surface (tool names, response shapes, error
 > codes) is stabilizing but not frozen. Breaking changes may land in
@@ -390,7 +390,7 @@ newer one is published.
 Breaking-change policy: while the project is `0.x`, minor bumps
 (`0.8.x` → `0.9.0`) may include breaking changes — always called out in
 the `### Changed` section of [CHANGELOG.md](./CHANGELOG.md). Patch
-bumps (`0.8.3` → `0.8.3`) are bugfix-only. Once we cut `1.0.0`,
+bumps (`0.8.3` → `0.8.4`) are bugfix-only. Once we cut `1.0.0`,
 breaking changes require a major bump. Pin to a known-good `0.x.y` if
 you can't absorb churn.
 
@@ -472,7 +472,7 @@ call is respx-mocked so you can iterate offline.
 
 ## Versioning
 
-Current version: **0.8.3** (see `src/__version__.py`). Semantic
+Current version: **0.8.4** (see `src/__version__.py`). Semantic
 versioning. Full history: [CHANGELOG.md](./CHANGELOG.md).
 
 ## Credits
@@ -482,7 +482,7 @@ Forked from [RomanEvstigneev/whoop-mcp-server](https://github.com/RomanEvstignee
 OAuth (no third-party proxy), the WHOOP v2 API, Pydantic-flattened
 responses, a local SQLite cache with incremental sync, cache-first
 reads, an event feed, exports (CSV/JSONL/Parquet), a `health_check`
-tool, structured JSON logging, and 180+ tests (188 as of 0.8.3). Licensed MIT — see
+tool, structured JSON logging, and 190+ tests (190 as of 0.8.4). Licensed MIT — see
 [LICENSE](./LICENSE) for both copyright lines.
 
 ---

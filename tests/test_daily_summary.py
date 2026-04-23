@@ -224,6 +224,13 @@ async def test_daily_summary_happy(stub_client):
     # Primary sleep is the longest non-nap
     assert out["sleep"]["id"] == "sleep-primary"
     assert out["sleep"]["nap"] is False
+    # Timestamps are split into utc+local so callers don't misread Z as local.
+    # Primary sleep's raw start is 22:00:00Z with tz_offset=+00:00, so local
+    # equals utc just carried with the explicit offset.
+    assert out["sleep"]["start_utc"] == "2026-04-20T22:00:00.000Z"
+    assert out["sleep"]["start_local"] == "2026-04-20T22:00:00+00:00"
+    assert out["cycle"]["start_utc"].endswith("Z")
+    assert out["cycle"]["start_local"].endswith("+00:00")
 
     # Workouts: off-day filtered out
     assert len(out["workouts"]) == 1

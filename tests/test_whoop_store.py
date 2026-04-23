@@ -54,8 +54,11 @@ def _raw_cycle(cycle_id: int, start: str, end: str, updated_at: str) -> dict:
 def _flat_cycle(cycle_id: int, start: str, end: str) -> dict:
     return {
         "id": cycle_id,
-        "start": start,
-        "end": end,
+        "start_utc": start,
+        "end_utc": end,
+        "start_local": None,
+        "end_local": None,
+        "timezone_offset": None,
         "score_state": "SCORED",
         "strain": 10.0,
         "avg_hr_bpm": 70,
@@ -364,8 +367,11 @@ def test_sleeps_filter_by_cycle_id(store: WhoopStore):
     flat = {
         "id": "uuid-sleep-a",
         "cycle_id": 42,
-        "start": raw["start"],
-        "end": raw["end"],
+        "start_utc": raw["start"],
+        "end_utc": raw["end"],
+        "start_local": None,
+        "end_local": None,
+        "timezone_offset": None,
         "nap": False,
         "score_state": "SCORED",
         "in_bed_seconds": 28800.0,

@@ -17,12 +17,17 @@ Quick rules summary:
 - SpO2/skin temp: ``spo2_percentage`` -> ``spo2_pct``,
   ``skin_temp_celsius`` -> ``skin_temp_c``.
 - Sleep stage renames to deep/rem/light/awake/in_bed seconds.
+- Timestamps on Cycle/Sleep/Workout are emitted as ``start_utc``/``end_utc``
+  (canonical, ends in ``Z``) and ``start_local``/``end_local`` (derived from
+  ``timezone_offset``). UTC is authoritative; the local fields exist so LLM
+  callers don't misread the ``Z`` suffix as local wall-clock time.
 - ``score_state`` always lifted to top level. If not SCORED, score fields
   are ``None``.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -52,6 +57,49 @@ def _kj_to_cal(kj: float | None) -> int | None:
     if kj is None:
         return None
     return round(kj * KJ_TO_KCAL)
+
+
+def _parse_offset(offset: str | None) -> timezone | None:
+    """Parse an offset string like '+05:30' or '-04:00' into a tzinfo.
+
+    Returns None if the offset is missing or unparseable.
+    """
+    if not offset:
+        return None
+    if offset in ("Z", "z"):
+        return timezone.utc
+    try:
+        sign = 1 if offset[0] == "+" else -1 if offset[0] == "-" else None
+        if sign is None:
+            return None
+        hh, _, mm = offset[1:].partition(":")
+        delta = timedelta(hours=int(hh), minutes=int(mm) if mm else 0)
+        return timezone(sign * delta)
+    except (ValueError, IndexError):
+        return None
+
+
+def _to_local_iso(utc_iso: str | None, offset: str | None) -> str | None:
+    """Convert a UTC ISO-8601 string + offset like '+05:30' into the
+    local wall-clock ISO string carrying that offset.
+
+    Returns None if either input is missing or unparseable. UTC is the
+    authoritative source of truth; this field exists so LLM consumers
+    don't misread the ``...Z`` suffix as local time when talking to the
+    user about times of day.
+    """
+    if not utc_iso or not offset:
+        return None
+    tz = _parse_offset(offset)
+    if tz is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00").replace("z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz).isoformat()
 
 
 class _Base(BaseModel):
@@ -126,8 +174,10 @@ class Cycle(_Base):
         score = self.score
         return {
             "id": self.id,
-            "start": self.start,
-            "end": self.end,
+            "start_utc": self.start,
+            "end_utc": self.end,
+            "start_local": _to_local_iso(self.start, self.timezone_offset),
+            "end_local": _to_local_iso(self.end, self.timezone_offset),
             "timezone_offset": self.timezone_offset,
             "score_state": self.score_state,
             "strain": score.strain if score else None,
@@ -231,8 +281,10 @@ class Sleep(_Base):
         return {
             "id": self.id,
             "cycle_id": self.cycle_id,
-            "start": self.start,
-            "end": self.end,
+            "start_utc": self.start,
+            "end_utc": self.end,
+            "start_local": _to_local_iso(self.start, self.timezone_offset),
+            "end_local": _to_local_iso(self.end, self.timezone_offset),
             "timezone_offset": self.timezone_offset,
             "nap": self.nap,
             "score_state": self.score_state,
@@ -307,8 +359,10 @@ class Workout(_Base):
 
         return {
             "id": self.id,
-            "start": self.start,
-            "end": self.end,
+            "start_utc": self.start,
+            "end_utc": self.end,
+            "start_local": _to_local_iso(self.start, self.timezone_offset),
+            "end_local": _to_local_iso(self.end, self.timezone_offset),
             "timezone_offset": self.timezone_offset,
             "sport_id": self.sport_id,
             "sport_name": self.sport_name,

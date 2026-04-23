@@ -44,8 +44,11 @@ def _cycle_pair(
     }
     flat = {
         "id": cycle_id,
-        "start": start,
-        "end": end,
+        "start_utc": start,
+        "end_utc": end,
+        "start_local": None,
+        "end_local": None,
+        "timezone_offset": None,
         "score_state": "SCORED",
         "strain": strain,
         "avg_hr_bpm": 70,
@@ -70,8 +73,11 @@ def _sleep_pair(
     flat = {
         "id": sleep_id,
         "cycle_id": cycle_id,
-        "start": start,
-        "end": end,
+        "start_utc": start,
+        "end_utc": end,
+        "start_local": None,
+        "end_local": None,
+        "timezone_offset": None,
         "nap": False,
         "score_state": "SCORED",
         "in_bed_seconds": 28800.0,
@@ -97,7 +103,7 @@ def _recovery_pair(
     flat = {
         "id": f"rec-{cycle_id}",
         "cycle_id": cycle_id,
-        "start": start,
+        "start_utc": start,
         "score_state": "SCORED",
         "recovery_score": score,
         "resting_heart_rate": 55,
@@ -119,8 +125,11 @@ def _workout_pair(
     }
     flat = {
         "id": workout_id,
-        "start": start,
-        "end": end,
+        "start_utc": start,
+        "end_utc": end,
+        "start_local": None,
+        "end_local": None,
+        "timezone_offset": None,
         "score_state": "SCORED",
         "sport_id": sport_id,
         "strain": 11.5,
@@ -210,7 +219,7 @@ def test_iter_records_yields_flat_dicts_in_window(seeded_store: WhoopStore):
 
 def test_iter_records_orders_by_start_asc(seeded_store: WhoopStore):
     rows = list(seeded_store.iter_records("cycles", start=None, end=None))
-    starts = [r["start"] for r in rows]
+    starts = [r["start_utc"] for r in rows]
     assert starts == sorted(starts)
 
 

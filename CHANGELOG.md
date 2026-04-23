@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-04-23
+### Fixed
+- **Ambiguous timestamps on flattened Cycle / Sleep / Workout records (issue #1).** The previous shape returned raw UTC in `start`/`end` (ending in `Z`) plus a sibling `timezone_offset`, which is technically correct but invites skim-reading the `Z` suffix as local wall-clock. Caught during v0.8.0 dogfood: for an IST (+05:30) user, Claude read a `start = 2026-04-20T23:33:32.030Z` sleep record as a 23:33 IST bedtime — off by 5.5 hours, and the follow-up "when should I go to bed?" question was then computed against the wrong baseline.
+
+### Changed
+- **Renamed `start` → `start_utc` and `end` → `end_utc`** on the flattened shape for `Cycle`, `Sleep`, and `Workout`. UTC is still authoritative; the key name now disambiguates.
+- **Added derived `start_local` / `end_local`** fields that apply `timezone_offset` to produce an ISO-8601 wall-clock string in the record's own zone. LLM callers should use `*_local` when talking about times of day with the user, and `*_utc` for math across records (sorting, windowing, cross-cycle joins).
+- Safe to cut as a patch: no external consumers yet. If you'd pinned `record["start"]` in your own code, switch to `record["start_utc"]` (or `record["start_local"]` for user-facing display).
+- Updated `whoop-insights` skill and `AGENTS.md § 7` to document the split and tell Claude which field to pick for which job. Added a § 9 scar entry ("never emit naked `start`/`end` on flat records") to prevent regression.
+
 ## [0.8.3] - 2026-04-22
 ### Added
 - **MCP Registry ownership-proof marker** in `README.md`. The registry validates that a `pypi` package's README contains `mcp-name: <namespace>/<server>` to prevent anyone from registering a namespace that points at a PyPI package they don't own. Added an unobtrusive marker at the bottom of the README so `mcp-publisher publish` actually succeeds.

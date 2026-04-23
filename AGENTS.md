@@ -129,10 +129,18 @@ shapes:
 | `spo2_percentage: 97.4` | `spo2_pct: 97.4` |
 | `skin_temp_celsius: 33.1` | `skin_temp_c: 33.1` |
 | `sleep_performance_percentage: 88` | `sleep_performance_pct: 88` |
+| `start: "...Z"` + `timezone_offset` | `start_utc` + `start_local` (derived) |
+| `end: "...Z"` + `timezone_offset` | `end_utc` + `end_local` (derived) |
 
 Rule: a downstream reader should be able to tell the unit from the key
 name alone. No WHOOP-style camelCase leaks. No raw `user_id` / `v1_id` /
 per-record metadata.
+
+**Timestamps (Cycle / Sleep / Workout):** UTC is authoritative, but we
+also emit a derived `*_local` wall-clock string (using
+`timezone_offset`) so LLM callers don't misread `2026-04-20T23:33:32Z`
+as local bedtime — see the v0.8.4 scar below. Use `*_local` when
+talking time-of-day with the user; use `*_utc` for math across records.
 
 ## 8. Release flow
 
@@ -181,6 +189,7 @@ auto-corrected for `server.json` by the registry workflow.
 | Modify `src/whoop_client.py` to pass date-only strings | WHOOP v2 requires full ISO-8601; see v0.7.2 for the scar |
 | Filter by `start` alone in range queries | Must use overlap semantics; see v0.7.3 for the scar |
 | Store recoveries with raw `start`/`end` | Inherit from parent cycle at upsert; see v0.7.4 for the scar |
+| Emit naked `start`/`end` on flat records | Ambiguous UTC-vs-local; use `start_utc` + `start_local`; see v0.8.4 for the scar |
 
 The "scars" above are real bugs we hit in the wild. The regression
 tests that guard against them are in `tests/test_whoop_store.py` and

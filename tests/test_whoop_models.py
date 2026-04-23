@@ -65,11 +65,17 @@ def test_cycle_flatten_units_and_metadata(fixture_loader):
     raw = fixture_loader("cycle_single")
     flat = Cycle.model_validate(raw).flatten()
 
-    # IDs + timestamps preserved
+    # IDs + timestamps preserved; raw UTC kept authoritative, local derived
+    # from the +05:30 offset (so 23:33:32Z -> 05:03:32+05:30 next day).
     assert flat["id"] == 1446265073
-    assert flat["start"] == "2026-04-20T23:33:32.030Z"
-    assert flat["end"] is None
+    assert flat["start_utc"] == "2026-04-20T23:33:32.030Z"
+    assert flat["end_utc"] is None
+    assert flat["start_local"] == "2026-04-21T05:03:32.030000+05:30"
+    assert flat["end_local"] is None
     assert flat["timezone_offset"] == "+05:30"
+    # Legacy unambiguous-unit-less keys must not leak through.
+    assert "start" not in flat
+    assert "end" not in flat
 
     # Scrubbed keys
     for bad in ("user_id", "created_at", "updated_at", "v1_id", "score"):
@@ -83,6 +89,32 @@ def test_cycle_flatten_units_and_metadata(fixture_loader):
     # 3055.2334 kJ * 0.239006 ≈ 730 kcal, rounded int
     assert flat["calories"] == 730
     assert "kilojoule" not in flat
+
+
+def test_cycle_local_fields_respect_timezone_offset(fixture_loader):
+    """start_local must equal start_utc shifted by timezone_offset.
+
+    Why: the LLM should read ``start_local`` when talking times-of-day
+    with the user. If derivation is wrong, the dogfood bug from issue #1
+    returns (Claude confidently reading 23:33Z as local bedtime).
+    """
+    raw = copy.deepcopy(fixture_loader("cycle_single"))
+    # Force a known end + fresh offset so both derivations are exercised.
+    raw["end"] = "2026-04-21T06:39:42.380Z"
+    raw["timezone_offset"] = "-04:00"
+    flat = Cycle.model_validate(raw).flatten()
+    # 23:33:32 UTC - 4h = 19:33:32 local (still same UTC day, prior local hour)
+    assert flat["start_local"] == "2026-04-20T19:33:32.030000-04:00"
+    assert flat["end_local"] == "2026-04-21T02:39:42.380000-04:00"
+
+
+def test_local_fields_none_when_offset_missing(fixture_loader):
+    raw = copy.deepcopy(fixture_loader("sleep_single"))
+    raw["timezone_offset"] = None
+    flat = Sleep.model_validate(raw).flatten()
+    assert flat["start_utc"] == "2026-04-20T23:33:32.030Z"
+    assert flat["start_local"] is None
+    assert flat["end_local"] is None
 
 
 def test_cycle_flatten_null_score_state(fixture_loader):
@@ -144,8 +176,12 @@ def test_sleep_flatten(fixture_loader):
     assert flat["id"] == "bb68db7b-bb56-44ce-ad8a-eb5a7a93b073"
     assert flat["cycle_id"] == 1446265073
     assert flat["nap"] is False
-    assert flat["start"] == "2026-04-20T23:33:32.030Z"
-    assert flat["end"] == "2026-04-21T06:39:42.380Z"
+    assert flat["start_utc"] == "2026-04-20T23:33:32.030Z"
+    assert flat["end_utc"] == "2026-04-21T06:39:42.380Z"
+    assert flat["start_local"] == "2026-04-21T05:03:32.030000+05:30"
+    assert flat["end_local"] == "2026-04-21T12:09:42.380000+05:30"
+    assert "start" not in flat
+    assert "end" not in flat
 
     for bad in ("user_id", "created_at", "updated_at", "v1_id", "score"):
         assert bad not in flat
@@ -189,8 +225,12 @@ def test_workout_flatten(fixture_loader):
     assert flat["id"] == "a3f00067-344d-4d16-811c-b98b71f67b15"
     assert flat["sport_id"] == 63
     assert flat["sport_name"] == "walking"
-    assert flat["start"] == "2026-04-19T14:40:30.770Z"
-    assert flat["end"] == "2026-04-19T15:11:59.790Z"
+    assert flat["start_utc"] == "2026-04-19T14:40:30.770Z"
+    assert flat["end_utc"] == "2026-04-19T15:11:59.790Z"
+    assert flat["start_local"] == "2026-04-19T20:10:30.770000+05:30"
+    assert flat["end_local"] == "2026-04-19T20:41:59.790000+05:30"
+    assert "start" not in flat
+    assert "end" not in flat
 
     for bad in ("user_id", "created_at", "updated_at", "v1_id", "score"):
         assert bad not in flat

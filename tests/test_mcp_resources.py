@@ -41,7 +41,15 @@ async def test_cycles_resource_returns_json_array(tmp_store: WhoopStore):
         "updated_at": "2026-04-21T06:00:00Z",
         "score_state": "SCORED",
     }
-    flat = {"id": 1, "start": raw["start"], "end": raw["end"], "score_state": "SCORED"}
+    flat = {
+        "id": 1,
+        "start_utc": raw["start"],
+        "end_utc": raw["end"],
+        "start_local": None,
+        "end_local": None,
+        "timezone_offset": None,
+        "score_state": "SCORED",
+    }
     tmp_store.upsert_records("cycles", [(raw, flat)])
 
     body = await _read_resource("whoop://db/cycles/2026-04-19/2026-04-22")
