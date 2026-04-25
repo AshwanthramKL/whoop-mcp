@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-04-23
+### Added
+- **`whoop-mcp-install-skills` console script.** Closes [#6](https://github.com/AshwanthramKL/whoop-mcp/issues/6). One command installs the bundled `whoop-insights` skill into `~/.claude/skills/` so Claude Code (and Cursor / Windsurf / Zed) auto-discover it. Works for every install path — `uvx`, `pipx`, `pip`, git clone — by fetching from the canonical GitHub repo over HTTPS. `--source <path>` flag for repo-native developers iterating on the skill itself; `--target <dir>` to override the install location. New module: `src/whoop_install_skills.py`.
+- 7 new tests in `tests/test_install_skills.py` covering local-source copy, target replacement of stale content, missing-source error, URL-source happy path, fetch errors, default-target behaviour, and `--help` output.
+
+### Changed
+- README's "Analysis skill: whoop-insights" section now leads with `whoop-mcp-install-skills` instead of the manual `cp -r` instruction. The flagship feature shouldn't have a hidden install step.
+- `skills/README.md` rewritten to put the script-based install first; manual copy demoted to a fallback.
+
+### Pipeline
+- This is the **first release through the fully-automated tag→PyPI→Registry pipeline** (added in 0.8.4 commit `f24e4d5`). Trusted publishing OIDC for PyPI; chained registry-publish job that polls PyPI for propagation before validating the marker. No `twine upload`, no `mcp-publisher login` on a developer machine.
+
 ## [0.8.4] - 2026-04-23
 ### Fixed
 - **Ambiguous timestamps on flattened Cycle / Sleep / Workout records (issue #1).** The previous shape returned raw UTC in `start`/`end` (ending in `Z`) plus a sibling `timezone_offset`, which is technically correct but invites skim-reading the `Z` suffix as local wall-clock. Caught during v0.8.0 dogfood: for an IST (+05:30) user, Claude read a `start = 2026-04-20T23:33:32.030Z` sleep record as a 23:33 IST bedtime — off by 5.5 hours, and the follow-up "when should I go to bed?" question was then computed against the wrong baseline.

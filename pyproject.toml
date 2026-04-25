@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whoop-mcp"
-version = "0.8.4"
+version = "0.8.5"
 authors = [
     {name = "Ashwanthram K L", email = "k.l.ashwanthram@gmail.com"}
 ]
@@ -71,6 +71,7 @@ Changelog = "https://github.com/AshwanthramKL/whoop-mcp/blob/main/CHANGELOG.md"
 [project.scripts]
 whoop-mcp = "whoop_mcp_server:main"
 whoop-mcp-oauth = "setup_direct_oauth:main"
+whoop-mcp-install-skills = "whoop_install_skills:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -81,6 +82,7 @@ py-modules = [
     "setup_direct_oauth",
     "whoop_client",
     "whoop_export",
+    "whoop_install_skills",
     "whoop_logging",
     "whoop_mcp_server",
     "whoop_models",

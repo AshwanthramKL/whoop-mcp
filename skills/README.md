@@ -13,13 +13,24 @@ trigger description.
 
 ## Installing a skill
 
-### Claude Code
+### Recommended (one command, all install paths)
 
-Skills in a project's `skills/` directory are picked up automatically
-when Claude Code runs with that project as the working directory. No
-config needed.
+```bash
+whoop-mcp-install-skills
+```
 
-To install globally (available across all projects):
+Writes to `~/.claude/skills/` by default. Works identically whether
+you installed via `uvx`, `pipx`, `pip`, or a git clone — the script
+fetches the latest skill from this repo's `main` branch over HTTPS.
+
+Override the target with `--target <dir>` (e.g. for project-scoped
+skills). Pass `--source <path-to-local-skills-dir>` to install from a
+local working tree instead of GitHub — useful when you're editing a
+skill and want to test before pushing.
+
+### Manual fallback
+
+If you can't run the script (no network, locked-down environment, etc.):
 
 ```bash
 mkdir -p ~/.claude/skills/
@@ -28,8 +39,10 @@ cp -r skills/whoop-insights ~/.claude/skills/
 
 ### Cursor / Windsurf / Zed
 
-Consult your editor's skill / agent-rule loading docs. The `SKILL.md`
-file is the prompt; the supporting files live in the same directory.
+The `SKILL.md` file is just a markdown prompt — these clients pick it
+up from the same `~/.claude/skills/` path Claude Code uses on macOS,
+or their own equivalent. Consult your editor's skill / agent-rule
+loading docs.
 
 ## Contributing a skill
 
