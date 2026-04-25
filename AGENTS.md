@@ -150,23 +150,26 @@ talking time-of-day with the user; use `*_utc` for math across records.
 3. Prepend a `## [X.Y.Z] - YYYY-MM-DD` entry in Keep-a-Changelog format
    to `CHANGELOG.md`. Group under `### Added / Changed / Fixed / Removed`.
 4. `.venv/bin/pytest -q` must be green.
-5. Build + upload to PyPI:
-   ```bash
-   rm -rf dist/ build/ src/whoop_mcp.egg-info
-   .venv/bin/python -m build
-   .venv/bin/twine check dist/*
-   .venv/bin/twine upload dist/whoop_mcp-X.Y.Z-py3-none-any.whl dist/whoop_mcp-X.Y.Z.tar.gz
-   ```
-6. Commit. `git tag -a vX.Y.Z -m "..."`. Push both main and the tag.
-7. `gh release create vX.Y.Z` with notes cribbed from CHANGELOG.
+5. Commit. `git tag -a vX.Y.Z -m "..."`. Push both main and the tag.
+6. `gh release create vX.Y.Z` with notes cribbed from CHANGELOG.
 
-Steps 1–7 are manual. Two things auto-run on tag push:
+Steps 1–6 are manual. Everything else auto-runs on tag push:
 
 - **CI** (`.github/workflows/ci.yml`): lint + mypy + pytest on
   ubuntu+macos × py310/11/12, plus build validation.
-- **MCP Registry publish** (`.github/workflows/publish-registry.yml`):
-  auto-syncs `server.json` to the tagged version and publishes to
-  `registry.modelcontextprotocol.io` via GitHub OIDC. No PATs involved.
+- **PyPI publish** (`.github/workflows/publish-pypi.yml`, job
+  `publish-pypi`): builds sdist + wheel, runs `twine check`, uploads
+  to PyPI via **trusted publishing OIDC** (no token in env, no
+  `~/.pypirc`, no human in the loop).
+- **MCP Registry publish** (same workflow file, job
+  `publish-registry`, `needs: publish-pypi`): polls PyPI until the new
+  version is live (CDN propagation), syncs `server.json`'s top-level
+  and `packages[0]` versions to match the tag, validates against the
+  registry schema, authenticates via GitHub OIDC, publishes to
+  `registry.modelcontextprotocol.io`.
+
+No twine, no token, no `mcp-publisher login` on a human's terminal —
+just `git push origin vX.Y.Z` and the rest happens.
 
 Version drift between `__version__.py`, `pyproject.toml`,
 `server.json`, and `whoop_mcp_server.py`'s `SERVER_VERSION` is caught
