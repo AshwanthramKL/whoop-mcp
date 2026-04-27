@@ -162,3 +162,4 @@ dist/
 # Keep package-lock.json for Smithery deployment
 # package-lock.json should be committed for reproducible builds
 STRATEGY.md
+HANDOFF.md
